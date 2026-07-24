@@ -31,7 +31,19 @@ export async function dashboardResponse(pathname) {
   }
 
   const asset = ASSETS.get(pathname);
-  if (!asset) return null;
+  if (!asset) {
+    const body = Buffer.from(JSON.stringify({ error: "Dashboard asset not found" }));
+    return {
+      status: 404,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": String(body.length),
+        "cache-control": "no-store",
+        ...SECURITY_HEADERS,
+      },
+      body,
+    };
+  }
   let body = cache.get(pathname);
   if (!body) {
     body = await readFile(asset.file);
