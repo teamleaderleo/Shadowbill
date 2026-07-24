@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { URL } from "node:url";
+import { verifyBearerAuthorization } from "./auth.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
 
@@ -10,20 +11,17 @@ class HttpError extends Error {
   }
 }
 
-const EVENT_TYPES = new Set([
-  "chat_turn",
-  "git_commit",
-  "github_push",
-  "github_pull_request",
-  "github_workflow_run",
-  "github_deployment",
-]);
+const REASONING_EFFORTS = new Set(["none", "low", "medium", "high", "xhigh", "max", "unknown"]);
+const BROWSER_EVENT_ID = /^chat_[a-f0-9]{24}$/i;
+const CONVERSATION_HASH = /^[a-f0-9]{24}$/i;
+const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
+const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
 
 function sendJson(response, status, value) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-headers": "content-type,x-github-event,x-github-delivery,x-hub-signature-256",
+    "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
     "access-control-allow-methods": "GET,POST,OPTIONS",
   });
   response.end(status === 204 ? undefined : JSON.stringify(value));
@@ -49,10 +47,53 @@ function parseJson(body) {
   }
 }
 
-function isEvent(value) {
-  return typeof value === "object" && value !== null && EVENT_TYPES.has(value.type) &&
-    typeof value.id === "string" && value.id.length > 0 &&
-    typeof value.timestamp === "string" && !Number.isNaN(Date.parse(value.timestamp));
+function safeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function normalizeBrowserChatEvent(value) {
+  if (!value || typeof value !== "object" || value.type !== "chat_turn") return null;
+  if (typeof value.id !== "string" || !BROWSER_EVENT_ID.test(value.id)) return null;
+  if (typeof value.timestamp !== "string" || Number.isNaN(Date.parse(value.timestamp))) return null;
+  if (typeof value.conversationHash !== "string" || !CONVERSATION_HASH.test(value.conversationHash)) return null;
+  if (typeof value.model !== "string" || !MODEL_SLUG.test(value.model)) return null;
+  if (!REASONING_EFFORTS.has(value.reasoningEffort)) return null;
+  if (!safeInteger(value.visibleInputTokens) || !safeInteger(value.visibleOutputTokens)) return null;
+  if (value.toolActivityCount !== undefined && !safeInteger(value.toolActivityCount)) return null;
+  if (value.responseDurationMs !== undefined && !safeInteger(value.responseDurationMs)) return null;
+  if (value.collectorVersion !== undefined &&
+      (typeof value.collectorVersion !== "string" || !COLLECTOR_VERSION.test(value.collectorVersion))) return null;
+
+  return {
+    type: "chat_turn",
+    id: value.id.toLowerCase(),
+    timestamp: new Date(value.timestamp).toISOString(),
+    conversationHash: value.conversationHash.toLowerCase(),
+    model: value.model,
+    reasoningEffort: value.reasoningEffort,
+    visibleInputTokens: value.visibleInputTokens,
+    visibleOutputTokens: value.visibleOutputTokens,
+    ...(value.toolActivityCount === undefined ? {} : { toolActivityCount: value.toolActivityCount }),
+    ...(value.responseDurationMs === undefined ? {} : { responseDurationMs: value.responseDurationMs }),
+    ...(value.collectorVersion === undefined ? {} : { collectorVersion: value.collectorVersion }),
+  };
+}
+
+function authorizationHeader(request) {
+  const value = request.headers.authorization;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function authorizeCollector(request, response, token) {
+  if (!token) {
+    sendJson(response, 503, { error: "Browser event ingestion requires a collector token" });
+    return false;
+  }
+  if (!verifyBearerAuthorization(authorizationHeader(request), token)) {
+    sendJson(response, 401, { error: "Invalid collector token" });
+    return false;
+  }
+  return true;
 }
 
 export function createCollectorServer(options) {
@@ -65,15 +106,22 @@ export function createCollectorServer(options) {
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/health") {
-        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.2.0" });
+        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.2.1" });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/auth/check") {
+        if (!authorizeCollector(request, response, options.collectorToken)) return;
+        sendJson(response, 200, { authenticated: true });
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/events") {
+        if (!authorizeCollector(request, response, options.collectorToken)) return;
         const body = await readBody(request, 100_000);
-        const event = parseJson(body);
-        if (!isEvent(event)) {
-          sendJson(response, 400, { error: "Invalid Shadowbill event" });
+        const event = normalizeBrowserChatEvent(parseJson(body));
+        if (!event) {
+          sendJson(response, 400, { error: "Invalid aggregate chat event" });
           return;
         }
         const inserted = await options.store.append(event);

@@ -2,6 +2,7 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadOrCreateCollectorToken } from "./auth.js";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
 import { loadPricingCatalog } from "./pricing.js";
@@ -55,10 +56,22 @@ async function main() {
   if (command === "serve") {
     const port = Number.parseInt(argument("--port") ?? "7337", 10);
     const githubWebhookSecret = argument("--github-secret") ?? process.env.SHADOWBILL_GITHUB_WEBHOOK_SECRET;
-    const server = createCollectorServer({ store, pricing, profile: DEFAULT_WORKING_PROFILE, githubWebhookSecret, timeZone });
+    const tokenPath = resolve(argument("--collector-token-file") ?? process.env.SHADOWBILL_COLLECTOR_TOKEN_FILE ?? `${homedir()}/.shadowbill/collector-token`);
+    const collectorToken = process.env.SHADOWBILL_COLLECTOR_TOKEN ?? await loadOrCreateCollectorToken(tokenPath);
+    if (collectorToken.length < 32) throw new Error("SHADOWBILL_COLLECTOR_TOKEN must contain at least 32 characters");
+    const server = createCollectorServer({
+      store,
+      pricing,
+      profile: DEFAULT_WORKING_PROFILE,
+      githubWebhookSecret,
+      collectorToken,
+      timeZone,
+    });
     const actualPort = await listen(server, port);
     console.log(`Shadowbill collector listening at http://127.0.0.1:${actualPort}`);
     console.log(`Event log: ${dataPath}`);
+    console.log(`Browser event authentication: enabled`);
+    console.log(process.env.SHADOWBILL_COLLECTOR_TOKEN ? "Collector token source: environment" : `Collector token file: ${tokenPath}`);
     console.log(`GitHub webhooks: ${githubWebhookSecret ? "enabled" : "disabled"}`);
     console.log(`Report timezone: ${timeZone}`);
     return;
@@ -91,7 +104,7 @@ async function main() {
     return;
   }
 
-  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET]\n  report [--date YYYY-MM-DD] [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)`);
+  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET]\n  report [--date YYYY-MM-DD] [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)`);
 }
 
 main().catch((error) => {
