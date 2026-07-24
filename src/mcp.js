@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
+import { buildRangeReport } from "./range.js";
 
 const SERVER_VERSION = "0.3.0";
 const CURRENT_PROTOCOL_VERSION = "2025-11-25";
@@ -26,6 +27,43 @@ const DAILY_REPORT_TOOL = {
         type: "string",
         pattern: "^\\d{4}-\\d{2}-\\d{2}$",
         description: "Calendar date in YYYY-MM-DD format. Defaults to today in the selected timezone.",
+      },
+      timezone: {
+        type: "string",
+        minLength: 1,
+        maxLength: 100,
+        description: "IANA timezone such as America/Los_Angeles. Defaults to the server configuration.",
+      },
+    },
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  execution: { taskSupport: "forbidden" },
+};
+
+const RANGE_REPORT_TOOL = {
+  name: "shadowbill_range_report",
+  title: "Shadowbill Rolling Report",
+  description: "Read aggregate AI cost and software-delivery metrics for a rolling calendar-day range.",
+  inputSchema: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      endDate: {
+        type: "string",
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+        description: "Inclusive end date in YYYY-MM-DD format. Defaults to today in the selected timezone.",
+      },
+      days: {
+        type: "integer",
+        minimum: 1,
+        maximum: 365,
+        description: "Number of inclusive calendar days. Defaults to 7.",
       },
       timezone: {
         type: "string",
@@ -163,6 +201,23 @@ function validateReportArguments(value) {
   return { value: args };
 }
 
+function validateRangeArguments(value) {
+  const args = value === undefined ? {} : value;
+  if (!isObject(args) || !hasOnlyKeys(args, new Set(["endDate", "days", "timezone"]))) {
+    return { error: "Arguments must contain only endDate, days, and timezone." };
+  }
+  if (args.endDate !== undefined && !validDate(args.endDate)) {
+    return { error: "endDate must be a real YYYY-MM-DD calendar date." };
+  }
+  if (args.days !== undefined && (!Number.isSafeInteger(args.days) || args.days < 1 || args.days > 365)) {
+    return { error: "days must be an integer between 1 and 365." };
+  }
+  if (args.timezone !== undefined && !validTimeZone(args.timezone)) {
+    return { error: "timezone must be a valid IANA timezone." };
+  }
+  return { value: { ...args, days: args.days ?? 7 } };
+}
+
 function validateChatArguments(value) {
   const allowed = new Set([
     "conversationKey",
@@ -221,6 +276,22 @@ export function createShadowbillMcpSession(options) {
       return toolResult({ ...report, timezone: timeZone });
     }
 
+    if (name === RANGE_REPORT_TOOL.name) {
+      const validated = validateRangeArguments(args);
+      if (validated.error) return toolError(validated.error);
+      const timeZone = validated.value.timezone ?? options.timeZone;
+      const endDate = validated.value.endDate ?? dateInTimeZone(new Date().toISOString(), timeZone);
+      const report = buildRangeReport(
+        await options.store.readAll(),
+        endDate,
+        validated.value.days,
+        options.pricing,
+        profile,
+        timeZone,
+      );
+      return toolResult(report);
+    }
+
     if (name === RECORD_CHAT_TURN_TOOL.name && options.allowWrites) {
       const validated = validateChatArguments(args);
       if (validated.error) return toolError(validated.error);
@@ -277,7 +348,7 @@ export function createShadowbillMcpSession(options) {
           protocolVersion: selectedProtocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "shadowbill", version: SERVER_VERSION },
-          instructions: "Use shadowbill_daily_report for aggregate cost and delivery metrics. Aggregate writes appear only when the server is explicitly started with write access.",
+          instructions: "Use shadowbill_daily_report for one day or shadowbill_range_report for rolling aggregate cost and delivery metrics. Aggregate writes appear only when the server is explicitly started with write access.",
         });
       }
 
@@ -291,7 +362,8 @@ export function createShadowbillMcpSession(options) {
         if (message.params?.cursor !== undefined && typeof message.params.cursor !== "string") {
           return rpcError(message.id, -32602, "tools/list cursor must be a string");
         }
-        const tools = options.allowWrites ? [DAILY_REPORT_TOOL, RECORD_CHAT_TURN_TOOL] : [DAILY_REPORT_TOOL];
+        const readTools = [DAILY_REPORT_TOOL, RANGE_REPORT_TOOL];
+        const tools = options.allowWrites ? [...readTools, RECORD_CHAT_TURN_TOOL] : readTools;
         return rpcResult(message.id, { tools });
       }
 
