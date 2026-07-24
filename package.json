@@ -1,6 +1,6 @@
 {
   "name": "shadowbill",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "A compute reckoner for unmetered AI.",
   "type": "module",
@@ -10,7 +10,12 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "serve": "node src/cli.js serve",
-    "report": "node src/cli.js report"
+    "report": "node src/cli.js report",
+    "mcp": "node src/cli.js mcp"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76"
   },
   "engines": {
     "node": ">=22"
