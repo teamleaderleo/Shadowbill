@@ -1,6 +1,7 @@
 const DEFAULTS = {
   enabled: true,
   collectorUrl: "http://127.0.0.1:7337",
+  collectorToken: "",
   model: "gpt-5.6-sol",
   reasoningEffort: "high"
 };
@@ -31,7 +32,7 @@ async function settings() {
 
 async function emitAssistant(element) {
   const config = await settings();
-  if (!config.enabled) return;
+  if (!config.enabled || !config.collectorToken) return;
 
   const messages = roleMessages();
   const index = messages.indexOf(element);
@@ -54,12 +55,15 @@ async function emitAssistant(element) {
     reasoningEffort: config.reasoningEffort,
     visibleInputTokens: estimateTokens(priorText),
     visibleOutputTokens: estimateTokens(outputText),
-    collectorVersion: "0.1.0"
+    collectorVersion: "0.2.0"
   };
 
   const response = await fetch(`${config.collectorUrl.replace(/\/$/, "")}/v1/events`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${config.collectorToken}`,
+      "content-type": "application/json"
+    },
     body: JSON.stringify(event)
   });
   if (!response.ok) throw new Error(`Shadowbill collector returned ${response.status}`);
