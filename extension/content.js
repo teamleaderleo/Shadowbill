@@ -54,6 +54,15 @@ function messageId(element) {
   return container?.getAttribute("data-message-id") || element.getAttribute("data-message-id") || "";
 }
 
+function previousUserText(messages, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor].getAttribute("data-message-author-role") === "user") {
+      return messages[cursor].innerText || messages[cursor].textContent || "";
+    }
+  }
+  return "";
+}
+
 function rememberFirstSeen(logicalTurnHash, fallback) {
   if (!firstSeenByTurn[logicalTurnHash]) {
     firstSeenByTurn[logicalTurnHash] = fallback;
@@ -67,9 +76,6 @@ async function emitAssistant(element, state) {
   if (state.inFlight || !element.isConnected) return;
   state.inFlight = true;
   try {
-    const config = await settings();
-    if (!config.enabled || !config.collectorToken) return;
-
     const messages = roleMessages();
     const index = messages.indexOf(element);
     if (index < 0) return;
@@ -77,9 +83,8 @@ async function emitAssistant(element, state) {
     const outputText = element.innerText || element.textContent || "";
     if (!outputText.trim()) return;
 
-    const hasFollowingMessage = messages.slice(index + 1).length > 0;
     const complete = tracker.shouldEmit({
-      hasFollowingMessage,
+      hasFollowingMessage: messages.slice(index + 1).length > 0,
       hasCompletionControls: hasCompletionControls(element),
       isGenerating: isGenerating(),
       quietForMs: Date.now() - state.lastMutationAt,
@@ -87,20 +92,30 @@ async function emitAssistant(element, state) {
     });
     if (!complete) return;
 
+    const priorText = messages.slice(0, index).map((message) => message.innerText || message.textContent || "").join("\n");
     const ordinal = tracker.assistantOrdinal(messages, element);
     if (ordinal < 0) return;
+    const fallbackAnchor = await digest(previousUserText(messages, index));
     const logicalSource = tracker.turnSource({
       conversationPath: location.pathname,
       messageId: messageId(element),
-      ordinal
+      ordinal,
+      fallbackAnchor
     });
     const logicalTurnHash = await digest(logicalSource);
-    const contentHash = await digest(outputText);
-    const revisionHash = await digest(`${logicalTurnHash}:${contentHash}`);
-    const eventId = `chat_${revisionHash}`;
-    if (emitted.has(eventId)) return;
+    const captureHash = await digest(`${priorText}\u0000${outputText}`);
+    if (state.lastEmittedCaptureHash === captureHash) return;
 
-    const priorText = messages.slice(0, index).map((message) => message.innerText || message.textContent || "").join("\n");
+    const revisionHash = await digest(`${logicalTurnHash}:${captureHash}`);
+    const eventId = `chat_${revisionHash}`;
+    if (emitted.has(eventId)) {
+      state.lastEmittedCaptureHash = captureHash;
+      return;
+    }
+
+    const config = await settings();
+    if (!config.enabled || !config.collectorToken) return;
+
     const conversationHash = await digest(location.pathname);
     const capturedAt = new Date().toISOString();
     const timestamp = rememberFirstSeen(logicalTurnHash, state.firstSeenAt);
@@ -131,7 +146,7 @@ async function emitAssistant(element, state) {
     emitted.add(eventId);
     const recent = Array.from(emitted).slice(-500);
     sessionStorage.setItem("shadowbill:emitted", JSON.stringify(recent));
-    state.lastEmittedContentHash = contentHash;
+    state.lastEmittedCaptureHash = captureHash;
   } finally {
     state.inFlight = false;
   }
@@ -147,7 +162,7 @@ function watchAssistant(element) {
   const state = {
     firstSeenAt: new Date().toISOString(),
     lastMutationAt: Date.now(),
-    lastEmittedContentHash: "",
+    lastEmittedCaptureHash: "",
     inFlight: false,
     timer: undefined
   };
@@ -173,8 +188,7 @@ function scan() {
       tracked.delete(element);
       continue;
     }
-    const index = messages.indexOf(element);
-    if (index >= 0 && messages.slice(index + 1).length > 0) schedule(element, state, 0);
+    emitAssistant(element, state).catch(() => {});
   }
 }
 
