@@ -91,6 +91,8 @@ test("Host authorities and allowlists reject ambiguous values", () => {
 test("CORS is limited to authenticated browser routes", () => {
   assert.equal(browserCorsHeaders("/v1/events")["access-control-allow-origin"], "*");
   assert.equal(browserCorsHeaders("/v1/auth/check")["access-control-allow-origin"], "*");
+  assert.equal(browserCorsHeaders("/v1/auth/check")["access-control-allow-methods"], "GET,OPTIONS");
+  assert.equal(browserCorsHeaders("/v1/events")["access-control-allow-methods"], "POST,OPTIONS");
   assert.deepEqual(browserCorsHeaders("/v1/report"), {});
   assert.deepEqual(browserCorsHeaders("/health"), {});
   assert.deepEqual(browserCorsHeaders("/v1/github/webhooks"), {});
@@ -118,6 +120,7 @@ test("collector applies route-scoped CORS and rejects DNS-rebinding hosts", asyn
     assert.equal(eventPreflight.status, 204);
     assert.equal(eventPreflight.headers.get("access-control-allow-origin"), "*");
     assert.equal(eventPreflight.headers.get("access-control-allow-headers"), "authorization,content-type");
+    assert.equal(eventPreflight.headers.get("access-control-allow-methods"), "POST,OPTIONS");
 
     const reportPreflight = await fetch(`${url}/v1/report`, { method: "OPTIONS" });
     assert.equal(reportPreflight.status, 404);
