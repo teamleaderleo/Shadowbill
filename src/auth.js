@@ -10,9 +10,8 @@ function secureEqual(left, right) {
 
 export function verifyBearerAuthorization(header, token) {
   if (typeof header !== "string" || typeof token !== "string" || token.length === 0) return false;
-  const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-  return secureEqual(header.slice(prefix.length), token);
+  const match = /^Bearer (.+)$/i.exec(header);
+  return match !== null && secureEqual(match[1], token);
 }
 
 export async function loadOrCreateCollectorToken(path) {
