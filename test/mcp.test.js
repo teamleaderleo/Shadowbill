@@ -168,26 +168,30 @@ test("MCP aggregate writes are opt-in, idempotent, and content-minimized", async
   }
 });
 
-test("MCP returns protocol errors for malformed messages, unknown tools, and task calls", async () => {
+test("MCP returns protocol errors for malformed messages, invalid IDs, cursors, tools, and tasks", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-mcp-errors-"));
   const store = new JsonlEventStore(join(directory, "events.jsonl"));
   try {
     const responses = await exchange(options(store), [
       "{bad json",
       initialize(),
-      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "missing", arguments: {} } },
+      { jsonrpc: "2.0", id: 2.5, method: "ping" },
+      { jsonrpc: "2.0", id: 3, method: "tools/list", params: { cursor: 100 } },
+      { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "missing", arguments: {} } },
       {
         jsonrpc: "2.0",
-        id: 3,
+        id: 5,
         method: "tools/call",
         params: { name: "shadowbill_daily_report", arguments: {}, task: { ttl: 1000 } },
       },
-      { jsonrpc: "2.0", id: 4, method: "unknown/method" },
+      { jsonrpc: "2.0", id: 6, method: "unknown/method" },
     ]);
     assert.equal(responses[0].error.code, -32700);
-    assert.equal(responses[2].error.code, -32601);
-    assert.equal(responses[3].error.code, -32601);
+    assert.equal(responses[2].error.code, -32600);
+    assert.equal(responses[3].error.code, -32602);
     assert.equal(responses[4].error.code, -32601);
+    assert.equal(responses[5].error.code, -32601);
+    assert.equal(responses[6].error.code, -32601);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
