@@ -69,7 +69,7 @@ export async function collectHeadCommit(repoPath) {
     subject,
     ...stats,
     addedCodeTokens: estimateTokens(addedLinesFromPatch(patch)),
-    collectorVersion: "0.1.0",
+    collectorVersion: "0.2.0",
   };
 }
 
