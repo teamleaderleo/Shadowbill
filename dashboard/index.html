@@ -132,6 +132,52 @@
       </article>
     </section>
 
+    <section class="panel repository-panel" aria-labelledby="repository-heading">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Delivery correlation</p>
+          <h2 id="repository-heading">Repository allocation</h2>
+        </div>
+        <p id="repository-basis" class="table-note">Loading allocation basis…</p>
+      </div>
+      <div class="allocation-grid" aria-label="Repository allocation summary">
+        <article class="allocation-card">
+          <span>Allocated estimate</span>
+          <strong id="allocated-cost">—</strong>
+          <small id="allocated-days">— allocation days</small>
+        </article>
+        <article class="allocation-card warning-card">
+          <span>Unallocated estimate</span>
+          <strong id="unallocated-cost">—</strong>
+          <small id="unallocated-days">— days without retained-code evidence</small>
+        </article>
+        <article class="allocation-card">
+          <span>Allocation coverage</span>
+          <strong id="allocation-coverage">—</strong>
+          <small id="allocation-repositories">— repositories</small>
+        </article>
+      </div>
+      <p id="allocation-note" class="allocation-note">Repository cost is a heuristic correlation, not causal attribution.</p>
+      <div id="repository-empty" class="empty-state compact-empty" hidden>No repository activity in this range.</div>
+      <div id="repository-table-wrap" class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Repository</th>
+              <th scope="col">Allocated cost</th>
+              <th scope="col">Retained tokens</th>
+              <th scope="col">Commits</th>
+              <th scope="col">Merged PRs</th>
+              <th scope="col">CI</th>
+              <th scope="col">Deployments</th>
+              <th scope="col">Cost / commit</th>
+            </tr>
+          </thead>
+          <tbody id="repository-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel table-panel">
       <div class="panel-heading">
         <div>
