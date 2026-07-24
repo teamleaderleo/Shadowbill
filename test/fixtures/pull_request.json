@@ -1,0 +1,17 @@
+{
+  "action": "closed",
+  "number": 42,
+  "repository": { "full_name": "owner/repo" },
+  "pull_request": {
+    "state": "closed",
+    "merged": true,
+    "draft": false,
+    "updated_at": "2026-07-25T18:00:00Z",
+    "head": { "sha": "aaaaaaa" },
+    "base": { "sha": "bbbbbbb" },
+    "merge_commit_sha": "ccccccc",
+    "additions": 120,
+    "deletions": 30,
+    "changed_files": 5
+  }
+}

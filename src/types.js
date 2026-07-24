@@ -28,7 +28,66 @@
  * @property {number} addedCodeTokens
  * @property {string=} collectorVersion
  *
- * @typedef {ChatTurnEvent|GitCommitEvent} ShadowbillEvent
+ * @typedef {Object} GitHubPushEvent
+ * @property {'github_push'} type
+ * @property {string} id
+ * @property {string} timestamp
+ * @property {string} repository
+ * @property {string} ref
+ * @property {string} branch
+ * @property {string} before
+ * @property {string} after
+ * @property {number} commitCount
+ * @property {boolean} created
+ * @property {boolean} deleted
+ * @property {boolean} forced
+ * @property {string} deliveryId
+ *
+ * @typedef {Object} GitHubPullRequestEvent
+ * @property {'github_pull_request'} type
+ * @property {string} id
+ * @property {string} timestamp
+ * @property {string} repository
+ * @property {string} action
+ * @property {number} number
+ * @property {string} state
+ * @property {boolean} merged
+ * @property {boolean} draft
+ * @property {string} headSha
+ * @property {string} baseSha
+ * @property {string|null} mergeCommitSha
+ * @property {number} additions
+ * @property {number} deletions
+ * @property {number} changedFiles
+ * @property {string} deliveryId
+ *
+ * @typedef {Object} GitHubWorkflowRunEvent
+ * @property {'github_workflow_run'} type
+ * @property {string} id
+ * @property {string} timestamp
+ * @property {string} repository
+ * @property {number} runId
+ * @property {string} workflow
+ * @property {string} status
+ * @property {string|null} conclusion
+ * @property {string} headSha
+ * @property {number} runAttempt
+ * @property {number|null} durationMs
+ * @property {string} deliveryId
+ *
+ * @typedef {Object} GitHubDeploymentEvent
+ * @property {'github_deployment'} type
+ * @property {string} id
+ * @property {string} timestamp
+ * @property {string} repository
+ * @property {number} deploymentId
+ * @property {string} state
+ * @property {string} environment
+ * @property {string} sha
+ * @property {string} ref
+ * @property {string} deliveryId
+ *
+ * @typedef {ChatTurnEvent|GitCommitEvent|GitHubPushEvent|GitHubPullRequestEvent|GitHubWorkflowRunEvent|GitHubDeploymentEvent} ShadowbillEvent
  *
  * @typedef {Object} ModelPricing
  * @property {number} inputPerMillion

@@ -1,0 +1,13 @@
+{
+  "repository": { "full_name": "owner/repo" },
+  "deployment": {
+    "id": 777,
+    "environment": "production",
+    "sha": "ccccccc",
+    "ref": "main"
+  },
+  "deployment_status": {
+    "state": "success",
+    "updated_at": "2026-07-25T18:06:00Z"
+  }
+}
