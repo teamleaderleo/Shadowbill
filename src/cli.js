@@ -23,6 +23,8 @@ function printReport(report) {
   console.log(`Shadowbill — ${report.date}`);
   console.log("");
   console.log(`Chat turns                 ${report.chatTurns}`);
+  console.log(`Chat capture events        ${report.chatRevisionEvents}`);
+  console.log(`Superseded captures        ${report.supersededChatRevisions}`);
   console.log(`Conversations              ${report.conversations}`);
   console.log(`Visible input tokens       ${report.visibleInputTokens.toLocaleString()}`);
   console.log(`Visible output tokens      ${report.visibleOutputTokens.toLocaleString()}`);
