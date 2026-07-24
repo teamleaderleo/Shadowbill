@@ -104,12 +104,16 @@ async function emitAssistant(element, state) {
     });
     const logicalTurnHash = await digest(logicalSource);
     const captureHash = await digest(`${priorText}\u0000${outputText}`);
-    if (state.lastEmittedCaptureHash === captureHash) return;
+    if (state.lastEmittedCaptureHash === captureHash) {
+      state.dirty = false;
+      return;
+    }
 
     const revisionHash = await digest(`${logicalTurnHash}:${captureHash}`);
     const eventId = `chat_${revisionHash}`;
     if (emitted.has(eventId)) {
       state.lastEmittedCaptureHash = captureHash;
+      state.dirty = false;
       return;
     }
 
@@ -147,6 +151,7 @@ async function emitAssistant(element, state) {
     const recent = Array.from(emitted).slice(-500);
     sessionStorage.setItem("shadowbill:emitted", JSON.stringify(recent));
     state.lastEmittedCaptureHash = captureHash;
+    state.dirty = false;
   } finally {
     state.inFlight = false;
   }
@@ -163,6 +168,7 @@ function watchAssistant(element) {
     firstSeenAt: new Date().toISOString(),
     lastMutationAt: Date.now(),
     lastEmittedCaptureHash: "",
+    dirty: true,
     inFlight: false,
     timer: undefined
   };
@@ -170,6 +176,7 @@ function watchAssistant(element) {
 
   const observer = new MutationObserver(() => {
     state.lastMutationAt = Date.now();
+    state.dirty = true;
     schedule(element, state);
   });
   observer.observe(element, { childList: true, subtree: true, characterData: true });
@@ -188,7 +195,9 @@ function scan() {
       tracked.delete(element);
       continue;
     }
-    emitAssistant(element, state).catch(() => {});
+    const index = messages.indexOf(element);
+    const hasFollowingMessage = index >= 0 && messages.slice(index + 1).length > 0;
+    if (state.dirty || !hasFollowingMessage) emitAssistant(element, state).catch(() => {});
   }
 }
 
