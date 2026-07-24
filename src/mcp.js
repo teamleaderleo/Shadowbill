@@ -100,6 +100,10 @@ function safeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function validRequestId(value) {
+  return typeof value === "string" || typeof value === "number";
+}
+
 function validDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -138,12 +142,8 @@ function rpcResult(id, result) {
 function rpcError(id, code, message, data) {
   return {
     jsonrpc: "2.0",
-    id: id ?? null,
-    error: {
-      code,
-      message,
-      ...(data === undefined ? {} : { data }),
-    },
+    id: validRequestId(id) ? id : null,
+    error: { code, message, ...(data === undefined ? {} : { data }) },
   };
 }
 
@@ -263,12 +263,11 @@ export function createShadowbillMcpSession(options) {
       }
 
       const isRequest = Object.hasOwn(message, "id");
-      if (!isRequest) {
-        if (message.method === "notifications/initialized") initialized = true;
-        return null;
-      }
+      if (!isRequest) return null;
+      if (!validRequestId(message.id)) return rpcError(null, -32600, "Invalid Request ID");
 
       if (message.method === "initialize") {
+        if (initialized) return rpcError(message.id, -32600, "Server is already initialized");
         if (!validateInitializeParams(message.params)) return rpcError(message.id, -32602, "Invalid initialize parameters");
         selectedProtocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(message.params.protocolVersion)
           ? message.params.protocolVersion
@@ -283,10 +282,12 @@ export function createShadowbillMcpSession(options) {
       }
 
       if (!initialized) return rpcError(message.id, -32002, "Server not initialized");
-
       if (message.method === "ping") return rpcResult(message.id, {});
 
       if (message.method === "tools/list") {
+        if (message.params !== undefined && !isObject(message.params)) {
+          return rpcError(message.id, -32602, "Invalid tools/list parameters");
+        }
         const tools = options.allowWrites ? [DAILY_REPORT_TOOL, RECORD_CHAT_TURN_TOOL] : [DAILY_REPORT_TOOL];
         return rpcResult(message.id, { tools });
       }
@@ -296,7 +297,16 @@ export function createShadowbillMcpSession(options) {
             (message.params.arguments !== undefined && !isObject(message.params.arguments))) {
           return rpcError(message.id, -32602, "Invalid tools/call parameters");
         }
-        const result = await callTool(message.params.name, message.params.arguments);
+        if (message.params.task !== undefined) {
+          return rpcError(message.id, -32601, "Task-augmented tool calls are unsupported");
+        }
+
+        let result;
+        try {
+          result = await callTool(message.params.name, message.params.arguments);
+        } catch (error) {
+          result = toolError(error instanceof Error ? error.message : String(error));
+        }
         if (result === null) return rpcError(message.id, -32601, `Unknown tool: ${message.params.name}`);
         return rpcResult(message.id, result);
       }
@@ -310,27 +320,12 @@ export function createShadowbillMcpSession(options) {
 }
 
 function writeJsonLine(output, message) {
+  const line = `${JSON.stringify(message)}\n`;
   return new Promise((resolve, reject) => {
-    const line = `${JSON.stringify(message)}\n`;
-    const onError = (error) => {
-      cleanup();
+    try {
+      output.write(line, (error) => error ? reject(error) : resolve());
+    } catch (error) {
       reject(error);
-    };
-    const onDrain = () => {
-      cleanup();
-      resolve();
-    };
-    const cleanup = () => {
-      output.off("error", onError);
-      output.off("drain", onDrain);
-    };
-
-    output.once("error", onError);
-    if (output.write(line)) {
-      cleanup();
-      resolve();
-    } else {
-      output.once("drain", onDrain);
     }
   });
 }
@@ -377,7 +372,7 @@ export async function runShadowbillMcpStdioServer(options, streams = {}) {
   await new Promise((resolve, reject) => {
     input.setEncoding?.("utf8");
     input.on("data", (chunk) => {
-      buffer += chunk;
+      buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
       if (Buffer.byteLength(buffer, "utf8") > maximumLineBytes && !buffer.includes("\n")) {
         processLine(buffer);
         buffer = "";
