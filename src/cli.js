@@ -7,13 +7,23 @@ import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./est
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
 import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
-import { buildRangeReport } from "./range.js";
+import { buildRangeReport, calendarDateRange } from "./range.js";
 import { createCollectorServer, listen } from "./server.js";
 import { JsonlEventStore } from "./store.js";
 
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+function reportDays(value) {
+  if (value === undefined) return 1;
+  if (!/^\d+$/.test(value)) throw new Error("--days must be an integer between 1 and 365");
+  const days = Number(value);
+  if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
+    throw new Error("--days must be an integer between 1 and 365");
+  }
+  return days;
 }
 
 function money(value) {
@@ -112,7 +122,8 @@ async function main() {
   if (command === "report") {
     const events = await store.readAll();
     const endDate = argument("--date") ?? dateInTimeZone(new Date().toISOString(), timeZone);
-    const days = Number.parseInt(argument("--days") ?? "1", 10);
+    const days = reportDays(argument("--days"));
+    calendarDateRange(endDate, days);
     const report = days === 1
       ? buildDailyReport(events, endDate, pricing, DEFAULT_WORKING_PROFILE, timeZone)
       : buildRangeReport(events, endDate, days, pricing, DEFAULT_WORKING_PROFILE, timeZone);
