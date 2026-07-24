@@ -72,12 +72,19 @@ export function estimateTurnCost(turn, pricing, profile) {
   };
 }
 
-function localDate(isoTimestamp) {
-  const date = new Date(isoTimestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+export function dateInTimeZone(isoTimestamp, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(isoTimestamp));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function perOutcome(cost, count) {
+  return count === 0 ? null : cost / count;
 }
 
 /**
@@ -86,16 +93,29 @@ function localDate(isoTimestamp) {
  * @param {import('./types.js').ModelPricing} pricing
  * @param {import('./types.js').EstimationProfile} [workingProfile]
  */
-export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT_WORKING_PROFILE) {
-  const dayEvents = events.filter((event) => localDate(event.timestamp) === date);
+export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT_WORKING_PROFILE, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  const dayEvents = events.filter((event) => dateInTimeZone(event.timestamp, timeZone) === date);
   const chats = dayEvents.filter((event) => event.type === "chat_turn");
   const commits = dayEvents.filter((event) => event.type === "git_commit");
+  const pushes = dayEvents.filter((event) => event.type === "github_push");
+  const pullRequests = dayEvents.filter((event) => event.type === "github_pull_request");
+  const workflowRuns = dayEvents.filter((event) => event.type === "github_workflow_run");
+  const deployments = dayEvents.filter((event) => event.type === "github_deployment");
   const sum = (values) => values.reduce((total, value) => total + value, 0);
   const estimated = (profile) => sum(chats.map((chat) => estimateTurnCost(chat, pricing, profile).totalCost));
 
   const addedCodeTokens = sum(commits.map((commit) => commit.addedCodeTokens));
   const deliveredCodeFloor = (addedCodeTokens / 1_000_000) * pricing.outputPerMillion;
   const workingEstimate = estimated(workingProfile);
+  const uniqueCount = (values) => new Set(values).size;
+  const mergedPullRequests = uniqueCount(pullRequests.filter((event) => event.merged).map((event) => `${event.repository}:${event.number}`));
+  const workflowRunCount = uniqueCount(workflowRuns.map((event) => `${event.repository}:${event.runId}`));
+  const successfulWorkflowRuns = uniqueCount(workflowRuns.filter((event) => event.conclusion === "success").map((event) => `${event.repository}:${event.runId}`));
+  const deploymentCount = uniqueCount(deployments.map((event) => `${event.repository}:${event.deploymentId}`));
+  const successfulDeployments = uniqueCount(deployments.filter((event) => event.state === "success").map((event) => `${event.repository}:${event.deploymentId}`));
+  const repositoryNames = dayEvents
+    .filter((event) => "repository" in event && typeof event.repository === "string")
+    .map((event) => event.repository);
 
   return {
     date,
@@ -104,7 +124,16 @@ export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT
     visibleInputTokens: sum(chats.map((chat) => chat.visibleInputTokens)),
     visibleOutputTokens: sum(chats.map((chat) => chat.visibleOutputTokens)),
     commits: commits.length,
-    repositories: new Set(commits.map((commit) => commit.repository)).size,
+    pushes: pushes.length,
+    pullRequestEvents: pullRequests.length,
+    mergedPullRequests,
+    workflowRunEvents: workflowRuns.length,
+    workflowRuns: workflowRunCount,
+    successfulWorkflowRuns,
+    deploymentStatusEvents: deployments.length,
+    deployments: deploymentCount,
+    successfulDeployments,
+    repositories: new Set(repositoryNames).size,
     additions: sum(commits.map((commit) => commit.additions)),
     deletions: sum(commits.map((commit) => commit.deletions)),
     addedCodeTokens,
@@ -112,7 +141,10 @@ export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT
     visibleCachedFloor: estimated(VISIBLE_CACHED_PROFILE),
     visibleUncachedEstimate: estimated(VISIBLE_UNCACHED_PROFILE),
     workingEstimate,
-    costPerCommit: commits.length === 0 ? null : workingEstimate / commits.length,
+    costPerCommit: perOutcome(workingEstimate, commits.length),
+    costPerMergedPullRequest: perOutcome(workingEstimate, mergedPullRequests),
+    costPerSuccessfulWorkflowRun: perOutcome(workingEstimate, successfulWorkflowRuns),
+    costPerSuccessfulDeployment: perOutcome(workingEstimate, successfulDeployments),
     costPerAddedCodeToken: addedCodeTokens === 0 ? null : workingEstimate / addedCodeTokens,
   };
 }
