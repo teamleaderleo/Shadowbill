@@ -5,7 +5,19 @@
   "created": false,
   "deleted": false,
   "forced": false,
-  "repository": { "full_name": "owner/repo" },
-  "head_commit": { "timestamp": "2026-07-25T17:00:00Z" },
-  "commits": [{ "id": "2222222" }, { "id": "3333333" }]
+  "repository": {
+    "full_name": "owner/repo"
+  },
+  "head_commit": {
+    "timestamp": "2026-07-25T17:00:00Z"
+  },
+  "commits": [
+    {
+      "id": "2222222"
+    },
+    {
+      "id": "3333333"
+    }
+  ],
+  "size": 5
 }
