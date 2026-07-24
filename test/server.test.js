@@ -32,6 +32,16 @@ function chatEvent() {
   };
 }
 
+function revisionEvent() {
+  return {
+    ...chatEvent(),
+    id: "chat_1234567890abcdef12345678",
+    capturedAt: "2026-07-25T19:00:05Z",
+    logicalTurnHash: "111111111111111111111111",
+    collectorVersion: "0.3.0",
+  };
+}
+
 function authenticatedRequest(url, collectorToken, event) {
   return fetch(`${url}/v1/events`, {
     method: "POST",
@@ -121,6 +131,49 @@ test("browser event ingestion rejects unsupported types and text-smuggling ident
     });
     assert.equal(proseId.status, 400);
     assert.equal((await store.readAll()).length, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("revision fields are accepted as a complete sanitized pair", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "shadowbill-server-revision-"));
+  const store = new JsonlEventStore(join(directory, "events.jsonl"));
+  const collectorToken = "collector-token-with-at-least-thirty-two-characters";
+  const server = createCollectorServer({
+    store,
+    pricing,
+    profile: DEFAULT_WORKING_PROFILE,
+    timeZone: "America/Los_Angeles",
+    collectorToken,
+  });
+  const port = await listen(server, 0);
+  const url = `http://127.0.0.1:${port}`;
+
+  try {
+    const accepted = await authenticatedRequest(url, collectorToken, revisionEvent());
+    assert.equal(accepted.status, 202);
+    const events = await store.readAll();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].logicalTurnHash, revisionEvent().logicalTurnHash);
+    assert.equal(events[0].capturedAt, "2026-07-25T19:00:05.000Z");
+    assert.equal("rawPrompt" in events[0], false);
+
+    const partial = await authenticatedRequest(url, collectorToken, {
+      ...revisionEvent(),
+      id: "chat_222222222222222222222222",
+      capturedAt: undefined,
+    });
+    assert.equal(partial.status, 400);
+
+    const proseHash = await authenticatedRequest(url, collectorToken, {
+      ...revisionEvent(),
+      id: "chat_333333333333333333333333",
+      logicalTurnHash: "private text in a hash field",
+    });
+    assert.equal(proseHash.status, 400);
+    assert.equal((await store.readAll()).length, 1);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
