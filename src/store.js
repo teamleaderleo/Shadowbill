@@ -31,11 +31,12 @@ async function readLedger(path) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
+    const jsonLine = line.endsWith("\r") ? line.slice(0, -1) : line;
     const lineStart = consumedCharacters;
     consumedCharacters += line.length + (index < lines.length - 1 || endsWithNewline ? 1 : 0);
-    if (line.length === 0) continue;
+    if (jsonLine.length === 0) continue;
     try {
-      events.push(JSON.parse(line));
+      events.push(JSON.parse(jsonLine));
     } catch (error) {
       const isTrailingPartial = index === lines.length - 1 && !endsWithNewline;
       if (isTrailingPartial) {
@@ -130,7 +131,6 @@ export class JsonlEventStore {
     const partial = rawBytes.subarray(ledger.trailingPartialStart);
     const recovery = JSON.stringify({
       recoveredAt: new Date().toISOString(),
-      source: this.path,
       bytesBase64: partial.toString("base64"),
     });
     await syncAppend(this.recoveryPath, `${recovery}\n`);
