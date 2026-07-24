@@ -37,9 +37,9 @@ npm install
 npm run serve
 ```
 
-The collector listens on `http://127.0.0.1:7337` and writes to `~/.shadowbill/events.jsonl`.
+The collector listens on `http://127.0.0.1:7337` and writes to `~/.shadowbill/events.jsonl`. On first launch, it creates a browser collector token at `~/.shadowbill/collector-token` with owner-only file permissions.
 
-Load the unpacked extension from [`extension/`](extension/), then install commit collection in any local repository:
+Load the unpacked extension from [`extension/`](extension/), open its popup, and paste the token. Then install commit collection in any local repository:
 
 ```bash
 node src/cli.js hook install /path/to/repository
@@ -63,6 +63,28 @@ Set an explicit reporting timezone when the collector runs on a server or inside
 SHADOWBILL_TIMEZONE=America/Los_Angeles npm run serve
 node src/cli.js report --timezone America/Los_Angeles
 ```
+
+## Browser collector authentication
+
+Browser-originated event writes require bearer authentication. The default token is generated once and reused across collector restarts:
+
+```bash
+cat ~/.shadowbill/collector-token
+```
+
+A custom token file can be selected with:
+
+```bash
+node src/cli.js serve --collector-token-file /private/path/shadowbill-token
+```
+
+A direct environment override is also supported and must contain at least 32 characters:
+
+```bash
+SHADOWBILL_COLLECTOR_TOKEN='replace-with-a-long-random-value' npm run serve
+```
+
+The browser endpoint accepts aggregate chat events only. It validates and copies an allowlist of fields before persistence, so undeclared values such as prompt text are discarded.
 
 ## GitHub webhooks
 
@@ -112,7 +134,7 @@ Working cost / deployment  $3.5935
 
 ## Privacy boundary
 
-The browser adapter calculates token estimates before sending an event. Stored chat events contain a conversation hash, timestamp, model label, reasoning label, and aggregate counts. Raw prompts and responses are excluded.
+The browser adapter calculates token estimates before sending an event. Stored chat events contain a conversation hash, timestamp, model label, reasoning label, and aggregate counts. Raw prompts and responses are excluded. Browser writes require a high-entropy collector token, and the server strips every field outside the aggregate event allowlist.
 
 Local Git events contain commit metadata, diff statistics, and an estimated token count for added lines. Added source text is discarded after tokenization.
 
@@ -128,7 +150,6 @@ Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose ca
 - Better model-specific tokenizers
 - Rolling calibration from visible output to retained code
 - Browser completion detection for long streaming responses
-- Collector authentication for browser-originated events
 - Local dashboard and weekly trends
 
 ## Development
