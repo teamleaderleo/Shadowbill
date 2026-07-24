@@ -39,6 +39,25 @@ function reportUrl() {
   return `/v1/report?${params}`;
 }
 
+function normalizeReport(value) {
+  if (value.calendarDays !== undefined) return value;
+  const active = value.chatTurns > 0 || value.commits > 0 || value.pushes > 0 ||
+    value.pullRequestEvents > 0 || value.workflowRunEvents > 0 || value.deploymentStatusEvents > 0;
+  return {
+    ...value,
+    startDate: value.date,
+    endDate: value.date,
+    calendarDays: 1,
+    activeDays: active ? 1 : 0,
+    timeZone: state.timezone,
+    averageWorkingCostPerCalendarDay: value.workingEstimate,
+    averageWorkingCostPerActiveDay: active ? value.workingEstimate : 0,
+    peakChatTurnDay: value.chatTurns > 0 ? { date: value.date, value: value.chatTurns } : null,
+    peakWorkingCostDay: value.workingEstimate > 0 ? { date: value.date, value: value.workingEstimate } : null,
+    daily: [value],
+  };
+}
+
 function setStatus(kind, text) {
   const dot = byId("status-dot");
   dot.className = `status-dot ${kind}`;
@@ -85,6 +104,11 @@ function renderChart(report) {
   const svg = byId("daily-chart");
   const empty = byId("chart-empty");
   svg.replaceChildren();
+  const title = svgElement("title", { id: "chart-title" });
+  title.textContent = "Daily Shadowbill usage";
+  const description = svgElement("desc", { id: "chart-description" });
+  description.textContent = "Bars show daily working cost. The line shows chat-turn volume.";
+  svg.append(title, description);
   const daily = report.daily ?? [];
   const maxCost = Math.max(0, ...daily.map((day) => day.workingEstimate));
   const maxTurns = Math.max(0, ...daily.map((day) => day.chatTurns));
@@ -122,9 +146,9 @@ function renderChart(report) {
       rx: Math.min(5, barWidth / 3),
       class: "cost-bar",
     });
-    const title = svgElement("title");
-    title.textContent = `${day.date}: ${formatMoney(day.workingEstimate)}, ${day.chatTurns} turns`;
-    bar.append(title);
+    const barTitle = svgElement("title");
+    barTitle.textContent = `${day.date}: ${formatMoney(day.workingEstimate)}, ${day.chatTurns} turns`;
+    bar.append(barTitle);
     svg.append(bar);
 
     const turnY = margin.top + chartHeight - (maxTurns === 0 ? 0 : chartHeight * day.chatTurns / maxTurns);
@@ -137,9 +161,9 @@ function renderChart(report) {
   }
   for (const [x, y, day] of points) {
     const dot = svgElement("circle", { cx: x, cy: y, r: 4.5, class: "turn-dot" });
-    const title = svgElement("title");
-    title.textContent = `${day.date}: ${day.chatTurns} turns`;
-    dot.append(title);
+    const dotTitle = svgElement("title");
+    dotTitle.textContent = `${day.date}: ${day.chatTurns} turns`;
+    dot.append(dotTitle);
     svg.append(dot);
   }
 
@@ -197,10 +221,11 @@ async function loadReport() {
     const response = await fetch(reportUrl(), { headers: { accept: "application/json" }, cache: "no-store" });
     const value = await response.json();
     if (!response.ok) throw new Error(value.error || `Collector returned ${response.status}`);
-    renderMetrics(value);
-    renderChart(value);
-    renderTable(value);
-    syncControls(value);
+    const report = normalizeReport(value);
+    renderMetrics(report);
+    renderChart(report);
+    renderTable(report);
+    syncControls(report);
     setStatus("online", "Collector online");
     setText("updated-at", `Updated ${new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}`);
   } catch (error) {
