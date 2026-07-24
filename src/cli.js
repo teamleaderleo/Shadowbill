@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadOrCreateCollectorToken } from "./auth.js";
+import { buildDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
 import { DEFAULT_ALLOWED_HOSTS } from "./http-security.js";
@@ -99,17 +100,34 @@ function printRangeReport(report) {
 async function main() {
   const command = process.argv[2] ?? "help";
   const dataPath = resolve(argument("--data") ?? process.env.SHADOWBILL_DATA ?? `${homedir()}/.shadowbill/events.jsonl`);
-  const store = new JsonlEventStore(dataPath);
-  const catalog = await loadPricingCatalog(argument("--pricing"));
+  const tokenPath = resolve(argument("--collector-token-file") ?? process.env.SHADOWBILL_COLLECTOR_TOKEN_FILE ?? `${homedir()}/.shadowbill/collector-token`);
+  const pricingPath = argument("--pricing");
   const model = argument("--model") ?? "gpt-5.6-sol";
-  const pricing = catalog.models[model];
   const timeZone = argument("--timezone") ?? process.env.SHADOWBILL_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (command === "doctor") {
+    const report = await buildDoctorReport({
+      dataPath,
+      tokenPath,
+      tokenFromEnvironment: Boolean(process.env.SHADOWBILL_COLLECTOR_TOKEN),
+      pricingPath,
+      model,
+      timeZone,
+    });
+    if (process.argv.includes("--json")) console.log(JSON.stringify(report, null, 2));
+    else console.log(formatDoctorReport(report));
+    process.exitCode = doctorExitCode(report);
+    return;
+  }
+
+  const store = new JsonlEventStore(dataPath);
+  const catalog = await loadPricingCatalog(pricingPath);
+  const pricing = catalog.models[model];
   if (!pricing) throw new Error(`Unknown model in pricing catalog: ${model}`);
 
   if (command === "serve") {
     const port = Number.parseInt(argument("--port") ?? "7337", 10);
     const githubWebhookSecret = argument("--github-secret") ?? process.env.SHADOWBILL_GITHUB_WEBHOOK_SECRET;
-    const tokenPath = resolve(argument("--collector-token-file") ?? process.env.SHADOWBILL_COLLECTOR_TOKEN_FILE ?? `${homedir()}/.shadowbill/collector-token`);
     const collectorToken = process.env.SHADOWBILL_COLLECTOR_TOKEN ?? await loadOrCreateCollectorToken(tokenPath);
     const allowedHosts = configuredAllowedHosts(argument("--allowed-hosts") ?? process.env.SHADOWBILL_ALLOWED_HOSTS);
     if (collectorToken.length < 32) throw new Error("SHADOWBILL_COLLECTOR_TOKEN must contain at least 32 characters");
@@ -167,7 +185,7 @@ async function main() {
     return;
   }
 
-  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or SHADOWBILL_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
+  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or SHADOWBILL_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
 }
 
 main().catch((error) => {
