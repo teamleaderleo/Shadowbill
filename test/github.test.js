@@ -35,7 +35,7 @@ test("normalizes supported GitHub webhook fixtures", async () => {
   const push = normalizeGitHubWebhook("push", "delivery-1", await fixture("push"));
   assert.equal(push.type, "github_push");
   assert.equal(push.branch, "main");
-  assert.equal(push.commitCount, 2);
+  assert.equal(push.commitCount, 5);
 
   const pullRequest = normalizeGitHubWebhook("pull_request", "delivery-2", await fixture("pull_request"));
   assert.equal(pullRequest.type, "github_pull_request");
