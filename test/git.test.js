@@ -72,7 +72,8 @@ test("preserves an existing shell hook once", async () => {
     const hook = await readFile(hookPath, "utf8");
     assert.match(hook, /echo existing/);
     assert.equal((hook.match(/# shadowbill:post-commit/g) ?? []).length, 1);
-    assert.match(hook, new RegExp(shellQuote(process.execPath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const nodePath = process.platform === "win32" ? process.execPath.replaceAll("\\", "/") : process.execPath;
+    assert.match(hook, new RegExp(shellQuote(nodePath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
