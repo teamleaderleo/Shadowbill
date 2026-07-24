@@ -65,7 +65,7 @@ export function createCollectorServer(options) {
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/health") {
-        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.2.0" });
+        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.3.0" });
         return;
       }
 
