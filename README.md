@@ -2,7 +2,7 @@
 
 **A compute reckoner for unmetered AI.**
 
-Shadowbill estimates the API-equivalent cost of subscription AI usage from observable activity. It combines a local ChatGPT browser collector, commit-diff telemetry, and signed GitHub delivery events to produce daily lower-bound, visible, and working estimates.
+Shadowbill estimates the API-equivalent cost of subscription AI usage from observable activity. It combines a local ChatGPT browser collector, commit-diff telemetry, signed GitHub delivery events, and a local MCP interface to produce daily lower-bound, visible, and working estimates.
 
 It records aggregate token counts and delivery metadata. Conversation text and source patches stay out of the ledger.
 
@@ -64,6 +64,51 @@ SHADOWBILL_TIMEZONE=America/Los_Angeles npm run serve
 node src/cli.js report --timezone America/Los_Angeles
 ```
 
+## MCP server
+
+Shadowbill exposes the local ledger over MCP stdio:
+
+```bash
+npm run mcp
+```
+
+The default server offers one read-only tool:
+
+- `shadowbill_daily_report` — returns cost, token, commit, PR, CI, and deployment metrics for a calendar day
+
+Aggregate chat-event writes require an explicit opt-in:
+
+```bash
+SHADOWBILL_MCP_ALLOW_WRITES=1 npm run mcp
+# or
+node src/cli.js mcp --allow-writes
+```
+
+That mode adds `shadowbill_record_chat_turn`. Its schema contains token counts, timing, model metadata, and a conversation key that is hashed before storage. The tool has no prompt or response text fields.
+
+A typical local MCP host entry looks like:
+
+```json
+{
+  "mcpServers": {
+    "shadowbill": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/Shadowbill/src/cli.js",
+        "mcp",
+        "--timezone",
+        "America/Los_Angeles"
+      ],
+      "env": {
+        "SHADOWBILL_DATA": "/absolute/path/to/events.jsonl"
+      }
+    }
+  }
+}
+```
+
+The stdio process reserves stdout for MCP protocol traffic. Operational failures go to stderr.
+
 ## GitHub webhooks
 
 Start the collector with a webhook secret:
@@ -118,18 +163,20 @@ Local Git events contain commit metadata, diff statistics, and an estimated toke
 
 GitHub events contain repository names, SHAs, refs, numeric counts, statuses, timestamps, environments, and delivery IDs. Source patches, PR descriptions, comments, logs, and deployment URLs are excluded.
 
+MCP read access returns daily aggregates. MCP write access is opt-in and accepts aggregate chat metadata only.
+
 ## Accuracy
 
 Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose cache hits, hidden reasoning tokens, internal tool traffic, context compaction, or routing decisions. The profiles make those unknowns visible instead of disguising them as exact telemetry.
 
 ## Near-term work
 
-- MCP event adapter and report tools
 - Better model-specific tokenizers
 - Rolling calibration from visible output to retained code
 - Browser completion detection for long streaming responses
 - Collector authentication for browser-originated events
 - Local dashboard and weekly trends
+- ChatGPT App-facing MCP transport and UI
 
 ## Development
 
