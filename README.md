@@ -2,33 +2,35 @@
 
 **A compute reckoner for unmetered AI.**
 
-Shadowbill estimates the API-equivalent cost of subscription AI usage from observable activity. It combines a local ChatGPT browser collector, commit-diff telemetry, signed GitHub delivery events, and a local MCP interface to produce daily lower-bound, visible, and working estimates.
+Shadowbill estimates the API-equivalent cost of subscription AI usage from observable local activity. It combines aggregate ChatGPT browser telemetry, local Git commit diffs, signed GitHub delivery events, and explicit pricing assumptions into daily, rolling, and repository-level reports.
 
-It records aggregate token counts and delivery metadata. Conversation text and source patches stay out of the ledger.
+Conversation text and source patches stay out of the ledger.
 
 ## What it measures
 
-- Completed ChatGPT assistant turns
-- Visible conversation-context and response token estimates
-- Model and reasoning settings supplied by the user
-- Tokens added in local Git commits
+- Completed ChatGPT assistant turns and revision-safe visible token estimates
+- Model and reasoning labels supplied by the browser collector
+- Tokens retained in local Git commits
 - GitHub pushes, merged pull requests, workflow outcomes, and deployments
-- Daily API-equivalent cost ranges
-- Estimated cost per commit, merged PR, successful CI run, deployment, and retained code token
+- Daily and 1–365 day API-equivalent cost estimates
+- Cost per commit, merged PR, successful CI run, deployment, and retained code token
+- Heuristic repository allocation with explicit unallocated cost and coverage
 
-## Current estimation profiles
+## Estimation model
 
-For GPT-5.6 Sol, the bundled catalog uses the published API rates effective July 25, 2026:
+For GPT-5.6 Sol, the bundled catalog currently uses:
 
-- Input: $5.00 per million tokens
-- Cached input: $0.50 per million tokens
-- Cache writes: $6.25 per million tokens
-- Output: $30.00 per million tokens
+- Input: USD $5.00 per million tokens
+- Cached input: USD $0.50 per million tokens
+- Cache writes: USD $6.25 per million tokens
+- Output: USD $30.00 per million tokens
 - Requests above 272,000 input tokens: 2× input and 1.5× output pricing
 
-The default working profile classifies visible input as 70% cache reads, 10% cache writes, and 20% uncached input. It multiplies visible output by 2.5 to represent hidden reasoning and discarded/tool output. These assumptions are explicit, local, and replaceable.
+The default working profile classifies visible input as 70% cache reads, 10% cache writes, and 20% uncached input. It multiplies visible output by 2.5 to represent hidden reasoning and discarded or tool-generated output.
 
-## Run it
+Those values are versioned assumptions, not claims about inaccessible ChatGPT internals. Pricing lives in [`config/pricing.json`](config/pricing.json), separate from the estimator.
+
+## Start the collector
 
 Requires Node.js 22 or newer.
 
@@ -37,68 +39,153 @@ npm install
 npm run serve
 ```
 
-The collector listens on `http://127.0.0.1:7337` and writes to `~/.shadowbill/events.jsonl`. On first launch, it creates a browser collector token at `~/.shadowbill/collector-token` with owner-only file permissions.
+The collector listens on `http://127.0.0.1:7337` and writes to `~/.shadowbill/events.jsonl`. On first launch, it creates a browser collector token at `~/.shadowbill/collector-token` with owner-only permissions where supported.
 
-Load the unpacked extension from [`extension/`](extension/), open its popup, and paste the token. Then install commit collection in any local repository:
+Load the unpacked extension from [`extension/`](extension/), open its popup, and paste the collector token.
+
+Install local commit collection in any repository:
 
 ```bash
 node src/cli.js hook install /path/to/repository
 ```
 
-Generate today's report:
+The hook preserves an existing shell `post-commit` hook and records metadata plus a token estimate for added lines. Added source text is discarded after tokenization.
+
+## Reports
+
+Today's human-readable report:
 
 ```bash
 node src/cli.js report
 ```
 
-Or machine-readable output:
+A rolling report:
 
 ```bash
-node src/cli.js report --json
+node src/cli.js report --days 30
 ```
 
-Set an explicit reporting timezone when the collector runs on a server or inside a container:
+Repository allocation:
+
+```bash
+node src/cli.js report --days 30 --by-repository
+```
+
+Machine-readable output:
+
+```bash
+node src/cli.js report --days 30 --json
+node src/cli.js report --days 30 --by-repository --json
+```
+
+Set a reporting timezone explicitly when running on a server or inside a container:
 
 ```bash
 SHADOWBILL_TIMEZONE=America/Los_Angeles npm run serve
 node src/cli.js report --timezone America/Los_Angeles
 ```
 
+Repository allocation uses the versioned basis `same-day-added-code-tokens`: each day's working estimate is divided according to same-day retained code tokens. Days without retained-code evidence remain visibly unallocated. This is a correlated heuristic, not causal attribution. See [`docs/repository-allocation.md`](docs/repository-allocation.md).
+
+## Local dashboard
+
+With the collector running, open:
+
+```text
+http://127.0.0.1:7337/dashboard
+```
+
+The dependency-free dashboard includes:
+
+- 7, 30, 90, 365, and custom-day ranges
+- Working cost, visible tokens, chat turns, retained code, and delivery outcomes
+- Daily cost and chat-volume visualization
+- Daily ledger detail
+- Repository allocation, unallocated cost, coverage, and per-repository outcome metrics
+
+Assets and report calls stay on the collector origin. The page uses a strict Content Security Policy and makes no third-party requests.
+
+## Read-only diagnostics
+
+Inspect the local installation without modifying it:
+
+```bash
+node src/cli.js doctor
+node src/cli.js doctor --json
+```
+
+`doctor` checks ledger readability, lock state, recovery metadata, file permissions, collector-token configuration, pricing, timezone, and one-day report generation. Warnings return exit code `0`; errors return `1`.
+
+It never creates a token, repairs a ledger, removes a lock, changes permissions, or returns secret and content-bearing fields. See [`docs/doctor.md`](docs/doctor.md).
+
 ## Browser collector authentication
 
-Browser-originated event writes require bearer authentication. The default token is generated once and reused across collector restarts:
+Browser-originated event writes require bearer authentication. Read the generated token with:
 
 ```bash
 cat ~/.shadowbill/collector-token
 ```
 
-A custom token file can be selected with:
+Choose a custom token file:
 
 ```bash
 node src/cli.js serve --collector-token-file /private/path/shadowbill-token
 ```
 
-A direct environment override is also supported and must contain at least 32 characters:
+Or provide a direct environment value containing at least 32 characters:
 
 ```bash
 SHADOWBILL_COLLECTOR_TOKEN='replace-with-a-long-random-value' npm run serve
 ```
 
-The browser endpoint accepts aggregate chat events only. It validates and copies an allowlist of fields before persistence, so undeclared values such as prompt text are discarded.
+The event endpoint accepts aggregate chat events only and copies an allowlist of fields before persistence. Undeclared values such as prompt text are discarded.
+
+## HTTP boundary
+
+The collector binds to loopback and validates the HTTP `Host` authority before routing. Default allowed hosts are `127.0.0.1`, `localhost`, and `[::1]`.
+
+Reverse-proxy deployments must opt in to their public authority:
+
+```bash
+node src/cli.js serve --allowed-hosts shadowbill.internal:8443
+# or
+SHADOWBILL_ALLOWED_HOSTS='shadowbill.internal:8443' npm run serve
+```
+
+Cross-origin headers are emitted only for the authenticated browser routes:
+
+- `GET /v1/auth/check`
+- `POST /v1/events`
+
+Health, reports, dashboard assets, webhooks, and unknown routes remain same-origin. See [`docs/http-security.md`](docs/http-security.md).
+
+## Report API
+
+The same-origin loopback API exposes:
+
+```text
+GET /v1/report?date=2026-07-25
+GET /v1/report?date=2026-07-25&days=30
+GET /v1/report?date=2026-07-25&days=30&group=repository
+```
+
+Dates are interpreted in the requested `timezone` query parameter or the collector's configured timezone.
 
 ## MCP server
 
-Shadowbill exposes the local ledger through a zero-dependency MCP stdio server compatible with the current `2025-11-25` protocol revision:
+Shadowbill exposes the local ledger through a zero-dependency MCP stdio server compatible with protocol revision `2025-11-25`:
 
 ```bash
 npm run mcp
 ```
 
-The default server offers one read-only tool:
+Read-only tools:
 
-- `shadowbill_daily_report` — returns cost, token, commit, pull-request, CI, and deployment metrics for a calendar day
+- `shadowbill_daily_report` — one calendar day
+- `shadowbill_range_report` — a rolling 1–365 day report
+- `shadowbill_repository_report` — repository allocation, coverage, unallocated cost, and delivery outcomes
 
-Aggregate chat writes require an explicit opt-in:
+Aggregate chat writes require explicit opt-in:
 
 ```bash
 node src/cli.js mcp --allow-writes
@@ -106,9 +193,9 @@ node src/cli.js mcp --allow-writes
 SHADOWBILL_MCP_ALLOW_WRITES=1 npm run mcp
 ```
 
-That mode adds `shadowbill_record_chat_turn`. The tool accepts counts, timing, model metadata, and a stable conversation key that is hashed before storage. Its argument schema rejects undeclared fields, including prompt or response text.
+That mode adds `shadowbill_record_chat_turn`. The tool accepts counts, timing, model metadata, and a stable conversation key that is hashed before storage. Its schema rejects undeclared fields, including prompt and response text.
 
-A local MCP host entry can launch Shadowbill directly:
+Example host configuration:
 
 ```json
 {
@@ -129,7 +216,7 @@ A local MCP host entry can launch Shadowbill directly:
 }
 ```
 
-The stdio process reserves stdout for newline-delimited MCP JSON-RPC messages. It emits no operational prose on stdout.
+The stdio process reserves stdout for newline-delimited MCP JSON-RPC messages.
 
 ## GitHub webhooks
 
@@ -146,58 +233,46 @@ Configure a GitHub App or repository webhook with:
 - Secret: the same value supplied to Shadowbill
 - Events: pushes, pull requests, workflow runs, and deployment statuses
 
-The collector verifies `X-Hub-Signature-256` before parsing or storing a delivery. GitHub delivery IDs provide idempotency for redeliveries. Unsupported event types receive an accepted-and-ignored response.
+The collector verifies `X-Hub-Signature-256` before parsing or storing a delivery. GitHub delivery IDs provide idempotency. Source patches, PR descriptions, comments, logs, and deployment URLs are excluded.
 
-The HTTP server binds to loopback. A hosted setup should place a TLS reverse proxy in front of it and forward only the webhook route.
+A hosted setup should place a TLS reverse proxy in front of the loopback listener and forward only the webhook route.
 
-## Example
+## Durable local ledger
 
-```text
-Shadowbill — 2026-07-25
+The JSONL store serializes local writes, coordinates concurrent Shadowbill processes with a filesystem lock, validates complete records after interrupted writes, and records recovered trailing bytes in a separate sidecar rather than silently discarding them.
 
-Chat turns                 84
-Conversations              11
-Visible input tokens       2,480,000
-Visible output tokens      318,000
-Commits                    9
-Pushes                     14
-Merged pull requests       6
-Successful workflow runs   11
-Successful deployments     8
-Repositories               4
-Added code tokens          34,700
-
-Delivered-code floor       $1.0410
-Visible cached floor       $10.7800
-Visible uncached estimate  $21.9400
-Working estimate           $28.7480
-Working cost / commit      $3.1942
-Working cost / merged PR   $4.7913
-Working cost / CI success  $2.6135
-Working cost / deployment  $3.5935
-```
+The main ledger, lock-owner metadata, recovery sidecar, and generated collector token use owner-only permissions where the platform exposes POSIX mode bits.
 
 ## Privacy boundary
 
-The browser adapter calculates token estimates before sending an event. Stored chat events contain a conversation hash, timestamp, model label, reasoning label, and aggregate counts. Raw prompts and responses are excluded. Browser writes require a high-entropy collector token, and the server strips every field outside the aggregate event allowlist.
+Stored chat events contain hashes, timestamps, model and reasoning labels, aggregate token counts, durations, and tool counts. Raw prompts and responses are excluded.
 
-Local Git events contain commit metadata, diff statistics, and an estimated token count for added lines. Added source text is discarded after tokenization.
+Local Git events contain commit metadata, diff statistics, and estimated added-code tokens. Added source text is discarded after tokenization.
 
-GitHub events contain repository names, SHAs, refs, numeric counts, statuses, timestamps, environments, and delivery IDs. Source patches, PR descriptions, comments, logs, and deployment URLs are excluded.
+GitHub events contain repository names, SHAs, refs, numeric counts, statuses, timestamps, environments, and delivery IDs. Content-bearing webhook fields are excluded.
 
-MCP report access returns daily aggregates. MCP write access is opt-in, hashes conversation identifiers, and rejects undeclared fields.
+MCP report tools return aggregates. MCP write access is opt-in, hashes conversation identifiers, and rejects undeclared fields.
 
 ## Accuracy
 
-Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose cache hits, hidden reasoning tokens, internal tool traffic, context compaction, or routing decisions. The profiles make those unknowns visible instead of disguising them as exact telemetry.
+Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose cache hits, hidden reasoning tokens, internal tool traffic, context compaction, or routing decisions. The profiles keep those unknowns explicit instead of presenting inferred cost as exact provider telemetry.
 
-## Near-term work
+Repository allocation adds another disclosed assumption: temporal correlation with retained code. It should be used for trend analysis and workload comparison, not billing or causal claims.
 
-- Better model-specific tokenizers
+## Focused guides
+
+- [`docs/doctor.md`](docs/doctor.md)
+- [`docs/http-security.md`](docs/http-security.md)
+- [`docs/range-reports.md`](docs/range-reports.md)
+- [`docs/repository-allocation.md`](docs/repository-allocation.md)
+
+## Roadmap
+
+- Better model-specific tokenizers and calibration fixtures
 - Rolling calibration from visible output to retained code
-- Browser completion detection for long streaming responses
-- Local dashboard and weekly trends
-- ChatGPT App-facing MCP transport and UI
+- More explicit chat-to-repository association signals
+- ChatGPT App-facing MCP transport and interface
+- Import and export tools for portable local ledgers
 
 ## Development
 
@@ -205,4 +280,4 @@ Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose ca
 npm test
 ```
 
-Pricing lives in [`config/pricing.json`](config/pricing.json), separate from estimation logic.
+The project uses zero runtime dependencies.
