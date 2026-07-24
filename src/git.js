@@ -76,6 +76,10 @@ export function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
 
+function hookNodeExecutable() {
+  return process.platform === "win32" ? process.execPath.replaceAll("\\", "/") : process.execPath;
+}
+
 /** @returns {Promise<import('./types.js').GitCommitEvent>} */
 export async function collectHeadCommit(repoPath) {
   const repo = resolve(repoPath);
@@ -113,7 +117,7 @@ export async function installPostCommitHook(repoPath, cliPath) {
   const hooksDir = resolve(repo, gitDir, "hooks");
   const hookPath = join(hooksDir, "post-commit");
   const marker = "# shadowbill:post-commit";
-  const command = `${marker}\n${shellQuote(process.execPath)} ${shellQuote(resolve(cliPath))} ingest-git --repo ${shellQuote(repo)} >/dev/null 2>&1 &\n`;
+  const command = `${marker}\n${shellQuote(hookNodeExecutable())} ${shellQuote(resolve(cliPath))} ingest-git --repo ${shellQuote(repo)} >/dev/null 2>&1 &\n`;
 
   await mkdir(hooksDir, { recursive: true });
   let existing = "";
