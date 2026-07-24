@@ -40,6 +40,42 @@ function addedLinesFromPatch(patch) {
     .join("\n");
 }
 
+function cleanRemotePath(value) {
+  return value
+    .split(/[?#]/, 1)[0]
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\.git$/i, "");
+}
+
+function hostAndPath(host, path, fallback) {
+  const cleanHost = host.toLowerCase();
+  const cleanPath = cleanRemotePath(path);
+  if (!cleanHost || !cleanPath) return fallback;
+  return cleanHost === "github.com" ? cleanPath : `${cleanHost}/${cleanPath}`;
+}
+
+export function repositoryIdentifier(remote, fallback) {
+  const value = typeof remote === "string" ? remote.trim() : "";
+  if (!value) return fallback;
+  if (/^(?:\.{0,2}[\\/]|~[\\/]|[a-z]:[\\/])/i.test(value)) return fallback;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol === "file:") return fallback;
+    return hostAndPath(url.hostname, url.pathname, fallback);
+  } catch {
+    // Continue with Git's SCP-style remote syntax.
+  }
+
+  const scp = /^(?:[^@/:\s]+@)?([^/:\s]+):(.+)$/.exec(value);
+  if (scp) return hostAndPath(scp[1], scp[2], fallback);
+  return fallback;
+}
+
+export function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'\\''`)}'`;
+}
+
 /** @returns {Promise<import('./types.js').GitCommitEvent>} */
 export async function collectHeadCommit(repoPath) {
   const repo = resolve(repoPath);
@@ -54,9 +90,7 @@ export async function collectHeadCommit(repoPath) {
   ]);
 
   const stats = parseNumstat(numstat);
-  const repository = remote
-    ? remote.replace(/\.git$/, "").replace(/^git@github\.com:/, "").replace(/^https:\/\/github\.com\//, "")
-    : basename(repo);
+  const repository = repositoryIdentifier(remote, basename(repo));
   const eventKey = createHash("sha256").update(`${repository}:${sha}`).digest("hex").slice(0, 24);
 
   return {
@@ -79,7 +113,7 @@ export async function installPostCommitHook(repoPath, cliPath) {
   const hooksDir = resolve(repo, gitDir, "hooks");
   const hookPath = join(hooksDir, "post-commit");
   const marker = "# shadowbill:post-commit";
-  const command = `${marker}\nnode ${JSON.stringify(resolve(cliPath))} ingest-git --repo ${JSON.stringify(repo)} >/dev/null 2>&1 &\n`;
+  const command = `${marker}\n${shellQuote(process.execPath)} ${shellQuote(resolve(cliPath))} ingest-git --repo ${shellQuote(repo)} >/dev/null 2>&1 &\n`;
 
   await mkdir(hooksDir, { recursive: true });
   let existing = "";
