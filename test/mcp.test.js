@@ -77,7 +77,7 @@ test("MCP requires initialize and ignores premature notifications", async () => 
   }
 });
 
-test("MCP read-only mode lists one tool and returns a daily report", async () => {
+test("MCP read-only mode lists daily and range tools", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-mcp-report-"));
   const store = new JsonlEventStore(join(directory, "events.jsonl"));
   await store.append({
@@ -105,13 +105,37 @@ test("MCP read-only mode lists one tool and returns a daily report", async () =>
           arguments: { date: "2026-07-25", timezone: "America/Los_Angeles" },
         },
       },
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "shadowbill_range_report",
+          arguments: { endDate: "2026-07-25", days: 7, timezone: "America/Los_Angeles" },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: { name: "shadowbill_range_report", arguments: { days: 0 } },
+      },
     ]);
-    assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), ["shadowbill_daily_report"]);
+    assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), [
+      "shadowbill_daily_report",
+      "shadowbill_range_report",
+    ]);
     assert.equal(responses[1].result.tools[0].annotations.readOnlyHint, true);
+    assert.equal(responses[1].result.tools[1].annotations.readOnlyHint, true);
     assert.equal(responses[2].result.isError, false);
     assert.equal(responses[2].result.structuredContent.chatTurns, 1);
     assert.equal(responses[2].result.structuredContent.visibleInputTokens, 100_000);
     assert.equal(responses[2].result.structuredContent.timezone, "America/Los_Angeles");
+    assert.equal(responses[3].result.isError, false);
+    assert.equal(responses[3].result.structuredContent.calendarDays, 7);
+    assert.equal(responses[3].result.structuredContent.endDate, "2026-07-25");
+    assert.equal(responses[3].result.structuredContent.chatTurns, 1);
+    assert.equal(responses[4].result.isError, true);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -150,6 +174,7 @@ test("MCP aggregate writes are opt-in, idempotent, and content-minimized", async
 
     assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), [
       "shadowbill_daily_report",
+      "shadowbill_range_report",
       "shadowbill_record_chat_turn",
     ]);
     assert.equal(responses[2].result.structuredContent.duplicate, false);
