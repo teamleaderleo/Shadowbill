@@ -48,18 +48,20 @@ test("completion rules wait during generation and accept stable completed output
   }), true);
 });
 
-test("logical turn sources prefer DOM message IDs and fall back to assistant ordinals", async () => {
+test("logical turn sources prefer DOM message IDs and anchor ordinal fallbacks", async () => {
   const tracker = await loadTracker();
   assert.equal(tracker.turnSource({
     conversationPath: "/c/example",
     messageId: "message-123",
     ordinal: 7,
+    fallbackAnchor: "ignored",
   }), "/c/example:message:message-123");
   assert.equal(tracker.turnSource({
     conversationPath: "/c/example",
     messageId: "",
     ordinal: 7,
-  }), "/c/example:assistant:7");
+    fallbackAnchor: "abc123",
+  }), "/c/example:assistant:7:anchor:abc123");
 
   const messages = [
     { getAttribute: () => "user" },
