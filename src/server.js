@@ -12,6 +12,10 @@ class HttpError extends Error {
 }
 
 const REASONING_EFFORTS = new Set(["none", "low", "medium", "high", "xhigh", "max", "unknown"]);
+const BROWSER_EVENT_ID = /^chat_[a-f0-9]{24}$/i;
+const CONVERSATION_HASH = /^[a-f0-9]{24}$/i;
+const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
+const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
 
 function sendJson(response, status, value) {
   response.writeHead(status, {
@@ -49,19 +53,20 @@ function safeInteger(value) {
 
 function normalizeBrowserChatEvent(value) {
   if (!value || typeof value !== "object" || value.type !== "chat_turn") return null;
-  if (typeof value.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.id)) return null;
+  if (typeof value.id !== "string" || !BROWSER_EVENT_ID.test(value.id)) return null;
   if (typeof value.timestamp !== "string" || Number.isNaN(Date.parse(value.timestamp))) return null;
-  if (typeof value.conversationHash !== "string" || !/^[a-f0-9]{16,128}$/i.test(value.conversationHash)) return null;
-  if (typeof value.model !== "string" || value.model.length < 1 || value.model.length > 100) return null;
+  if (typeof value.conversationHash !== "string" || !CONVERSATION_HASH.test(value.conversationHash)) return null;
+  if (typeof value.model !== "string" || !MODEL_SLUG.test(value.model)) return null;
   if (!REASONING_EFFORTS.has(value.reasoningEffort)) return null;
   if (!safeInteger(value.visibleInputTokens) || !safeInteger(value.visibleOutputTokens)) return null;
   if (value.toolActivityCount !== undefined && !safeInteger(value.toolActivityCount)) return null;
   if (value.responseDurationMs !== undefined && !safeInteger(value.responseDurationMs)) return null;
-  if (value.collectorVersion !== undefined && (typeof value.collectorVersion !== "string" || value.collectorVersion.length > 50)) return null;
+  if (value.collectorVersion !== undefined &&
+      (typeof value.collectorVersion !== "string" || !COLLECTOR_VERSION.test(value.collectorVersion))) return null;
 
   return {
     type: "chat_turn",
-    id: value.id,
+    id: value.id.toLowerCase(),
     timestamp: new Date(value.timestamp).toISOString(),
     conversationHash: value.conversationHash.toLowerCase(),
     model: value.model,
