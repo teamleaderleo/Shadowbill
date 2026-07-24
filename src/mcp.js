@@ -76,23 +76,25 @@ export function createShadowbillMcpServer(options) {
           conversationKey: z.string().min(1).max(2048)
             .describe("A stable conversation identifier. Shadowbill hashes it before storage."),
           model: z.string().min(1).max(100),
-          reasoningEffort: z.enum(REASONING_EFFORTS).default("unknown"),
+          reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
           visibleInputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
           visibleOutputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
           toolActivityCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
           responseDurationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
-          timestamp: z.string().refine(validTimestamp, "timestamp must be ISO-8601 compatible").optional(),
+          timestamp: z.string().refine(validTimestamp, "timestamp must be ISO-8601 compatible")
+            .describe("Stable event timestamp used for idempotent retries."),
         },
       },
       async (input) => {
         try {
-          const timestamp = input.timestamp ? new Date(input.timestamp).toISOString() : new Date().toISOString();
+          const timestamp = new Date(input.timestamp).toISOString();
+          const reasoningEffort = input.reasoningEffort ?? "unknown";
           const conversationHash = hash(input.conversationKey);
           const eventKey = hash(JSON.stringify({
             conversationHash,
             timestamp,
             model: input.model,
-            reasoningEffort: input.reasoningEffort,
+            reasoningEffort,
             visibleInputTokens: input.visibleInputTokens,
             visibleOutputTokens: input.visibleOutputTokens,
             toolActivityCount: input.toolActivityCount ?? null,
@@ -104,7 +106,7 @@ export function createShadowbillMcpServer(options) {
             timestamp,
             conversationHash,
             model: input.model,
-            reasoningEffort: input.reasoningEffort,
+            reasoningEffort,
             visibleInputTokens: input.visibleInputTokens,
             visibleOutputTokens: input.visibleOutputTokens,
             ...(input.toolActivityCount === undefined ? {} : { toolActivityCount: input.toolActivityCount }),
