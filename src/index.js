@@ -1,4 +1,5 @@
 export * from "./auth.js";
+export * from "./doctor.js";
 export * from "./estimate.js";
 export * from "./git.js";
 export * from "./github.js";
