@@ -6,6 +6,7 @@ import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
 import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
+import { buildRepositoryAllocationReport } from "./repositories.js";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -235,14 +236,20 @@ export function createCollectorServer(options) {
         validateTimeZone(timeZone);
         const date = url.searchParams.get("date") ?? dateInTimeZone(new Date().toISOString(), timeZone);
         const days = parseDays(url.searchParams.get("days"));
+        const group = url.searchParams.get("group");
+        if (group !== null && group !== "repository") {
+          throw new HttpError(400, "group must be repository when provided");
+        }
         try {
           calendarDateRange(date, days);
         } catch (error) {
           throw new HttpError(400, error instanceof Error ? error.message : String(error));
         }
-        const report = days === 1
-          ? buildDailyReport(events, date, options.pricing, options.profile, timeZone)
-          : buildRangeReport(events, date, days, options.pricing, options.profile, timeZone);
+        const report = group === "repository"
+          ? buildRepositoryAllocationReport(events, date, days, options.pricing, options.profile, timeZone)
+          : days === 1
+            ? buildDailyReport(events, date, options.pricing, options.profile, timeZone)
+            : buildRangeReport(events, date, days, options.pricing, options.profile, timeZone);
         sendJson(response, 200, report);
         return;
       }
