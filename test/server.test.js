@@ -20,7 +20,7 @@ const pricing = {
 function chatEvent() {
   return {
     type: "chat_turn",
-    id: "chat_abcdef0123456789",
+    id: "chat_abcdef0123456789abcdef01",
     timestamp: "2026-07-25T19:00:00Z",
     conversationHash: "abcdef0123456789abcdef01",
     model: "gpt-5.6-sol",
@@ -30,6 +30,17 @@ function chatEvent() {
     collectorVersion: "0.2.0",
     rawPrompt: "this field must never reach disk",
   };
+}
+
+function authenticatedRequest(url, collectorToken, event) {
+  return fetch(`${url}/v1/events`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${collectorToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
 }
 
 test("browser events require authentication and persist only whitelisted fields", async () => {
@@ -61,20 +72,11 @@ test("browser events require authentication and persist only whitelisted fields"
     assert.equal(authCheck.status, 200);
     assert.deepEqual(await authCheck.json(), { authenticated: true });
 
-    const send = () => fetch(`${url}/v1/events`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${collectorToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(chatEvent()),
-    });
-
-    const first = await send();
+    const first = await authenticatedRequest(url, collectorToken, chatEvent());
     assert.equal(first.status, 202);
     assert.deepEqual(await first.json(), { accepted: true, duplicate: false, id: chatEvent().id });
 
-    const second = await send();
+    const second = await authenticatedRequest(url, collectorToken, chatEvent());
     assert.equal(second.status, 202);
     assert.deepEqual(await second.json(), { accepted: true, duplicate: true, id: chatEvent().id });
 
@@ -88,7 +90,7 @@ test("browser events require authentication and persist only whitelisted fields"
   }
 });
 
-test("browser event ingestion rejects unsupported event types", async () => {
+test("browser event ingestion rejects unsupported types and text-smuggling identifiers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-server-type-"));
   const store = new JsonlEventStore(join(directory, "events.jsonl"));
   const collectorToken = "collector-token-with-at-least-thirty-two-characters";
@@ -100,17 +102,24 @@ test("browser event ingestion rejects unsupported event types", async () => {
     collectorToken,
   });
   const port = await listen(server, 0);
+  const url = `http://127.0.0.1:${port}`;
 
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/v1/events`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${collectorToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ ...chatEvent(), type: "git_commit" }),
+    const unsupported = await authenticatedRequest(url, collectorToken, { ...chatEvent(), type: "git_commit" });
+    assert.equal(unsupported.status, 400);
+
+    const proseModel = await authenticatedRequest(url, collectorToken, {
+      ...chatEvent(),
+      id: "chat_1234567890abcdef12345678",
+      model: "paste some private text here",
     });
-    assert.equal(response.status, 400);
+    assert.equal(proseModel.status, 400);
+
+    const proseId = await authenticatedRequest(url, collectorToken, {
+      ...chatEvent(),
+      id: "chat_private_text_goes_here",
+    });
+    assert.equal(proseId.status, 400);
     assert.equal((await store.readAll()).length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
