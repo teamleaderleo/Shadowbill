@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import { verifyBearerAuthorization } from "./auth.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
+import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 
 class HttpError extends Error {
@@ -19,12 +20,10 @@ const LOGICAL_TURN_HASH = /^[a-f0-9]{24}$/i;
 const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
 const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
 
-function sendJson(response, status, value) {
+function sendJson(response, status, value, headers = {}) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    ...headers,
   });
   response.end(status === 204 ? undefined : JSON.stringify(value));
 }
@@ -114,48 +113,63 @@ function authorizationHeader(request) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function authorizeCollector(request, response, token) {
+function authorizeCollector(request, response, token, headers) {
   if (!token) {
-    sendJson(response, 503, { error: "Browser event ingestion requires a collector token" });
+    sendJson(response, 503, { error: "Browser event ingestion requires a collector token" }, headers);
     return false;
   }
   if (!verifyBearerAuthorization(authorizationHeader(request), token)) {
-    sendJson(response, 401, { error: "Invalid collector token" });
+    sendJson(response, 401, { error: "Invalid collector token" }, headers);
     return false;
   }
   return true;
 }
 
 export function createCollectorServer(options) {
+  const allowedHosts = normalizeAllowedHosts(options.allowedHosts);
+
   return createServer(async (request, response) => {
+    let routeHeaders = {};
     try {
-      if (request.method === "OPTIONS") {
-        sendJson(response, 204, {});
+      const hostHeader = Array.isArray(request.headers.host) ? request.headers.host[0] : request.headers.host;
+      if (!isAllowedHost(hostHeader, allowedHosts)) {
+        sendJson(response, 421, { error: "Unapproved Host header" });
         return;
       }
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      routeHeaders = browserCorsHeaders(url.pathname);
+
+      if (request.method === "OPTIONS") {
+        if (Object.keys(routeHeaders).length === 0) {
+          sendJson(response, 404, { error: "Route not found" });
+          return;
+        }
+        sendJson(response, 204, {}, routeHeaders);
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/health") {
         sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.3.0" });
         return;
       }
 
       if (request.method === "GET" && url.pathname === "/v1/auth/check") {
-        if (!authorizeCollector(request, response, options.collectorToken)) return;
-        sendJson(response, 200, { authenticated: true });
+        if (!authorizeCollector(request, response, options.collectorToken, routeHeaders)) return;
+        sendJson(response, 200, { authenticated: true }, routeHeaders);
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/v1/events") {
-        if (!authorizeCollector(request, response, options.collectorToken)) return;
+        if (!authorizeCollector(request, response, options.collectorToken, routeHeaders)) return;
         const body = await readBody(request, 100_000);
         const event = normalizeBrowserChatEvent(parseJson(body));
         if (!event) {
-          sendJson(response, 400, { error: "Invalid aggregate chat event" });
+          sendJson(response, 400, { error: "Invalid aggregate chat event" }, routeHeaders);
           return;
         }
         const inserted = await options.store.append(event);
-        sendJson(response, 202, { accepted: true, duplicate: !inserted, id: event.id });
+        sendJson(response, 202, { accepted: true, duplicate: !inserted, id: event.id }, routeHeaders);
         return;
       }
 
@@ -225,7 +239,7 @@ export function createCollectorServer(options) {
       sendJson(response, 404, { error: "Route not found" });
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
-      sendJson(response, status, { error: error instanceof Error ? error.message : String(error) });
+      sendJson(response, status, { error: error instanceof Error ? error.message : String(error) }, routeHeaders);
     }
   });
 }
