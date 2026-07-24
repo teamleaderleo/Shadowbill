@@ -3,6 +3,13 @@ import { URL } from "node:url";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
 
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 const EVENT_TYPES = new Set([
   "chat_turn",
   "git_commit",
@@ -28,7 +35,7 @@ async function readBody(request, maximumBytes) {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > maximumBytes) throw new Error(`Request body exceeds ${maximumBytes} bytes`);
+    if (size > maximumBytes) throw new HttpError(413, `Request body exceeds ${maximumBytes} bytes`);
     chunks.push(buffer);
   }
   return Buffer.concat(chunks);
@@ -102,7 +109,13 @@ export function createCollectorServer(options) {
           return;
         }
 
-        const event = normalizeGitHubWebhook(eventName, deliveryId, payload);
+        let event;
+        try {
+          event = normalizeGitHubWebhook(eventName, deliveryId, payload);
+        } catch (error) {
+          sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
         if (!event) {
           sendJson(response, 202, { accepted: false, ignored: true, event: eventName });
           return;
@@ -123,7 +136,8 @@ export function createCollectorServer(options) {
 
       sendJson(response, 404, { error: "Route not found" });
     } catch (error) {
-      sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
+      const status = error instanceof HttpError ? error.status : 500;
+      sendJson(response, status, { error: error instanceof Error ? error.message : String(error) });
     }
   });
 }
