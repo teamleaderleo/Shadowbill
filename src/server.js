@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import { verifyBearerAuthorization } from "./auth.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
+import { buildRangeReport, calendarDateRange } from "./range.js";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -50,6 +51,24 @@ function parseJson(body) {
 
 function safeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseDays(value) {
+  if (value === null) return 1;
+  if (!/^\d+$/.test(value)) throw new HttpError(400, "days must be an integer between 1 and 365");
+  const days = Number(value);
+  if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
+    throw new HttpError(400, "days must be an integer between 1 and 365");
+  }
+  return days;
+}
+
+function validateTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+  } catch {
+    throw new HttpError(400, "timezone must be a valid IANA timezone");
+  }
 }
 
 function normalizeBrowserChatEvent(value) {
@@ -188,8 +207,18 @@ export function createCollectorServer(options) {
       if (request.method === "GET" && url.pathname === "/v1/report") {
         const events = await options.store.readAll();
         const timeZone = url.searchParams.get("timezone") ?? options.timeZone;
+        validateTimeZone(timeZone);
         const date = url.searchParams.get("date") ?? dateInTimeZone(new Date().toISOString(), timeZone);
-        sendJson(response, 200, buildDailyReport(events, date, options.pricing, options.profile, timeZone));
+        const days = parseDays(url.searchParams.get("days"));
+        try {
+          calendarDateRange(date, days);
+        } catch (error) {
+          throw new HttpError(400, error instanceof Error ? error.message : String(error));
+        }
+        const report = days === 1
+          ? buildDailyReport(events, date, options.pricing, options.profile, timeZone)
+          : buildRangeReport(events, date, days, options.pricing, options.profile, timeZone);
+        sendJson(response, 200, report);
         return;
       }
 
