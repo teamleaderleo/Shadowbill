@@ -70,6 +70,7 @@ test("MCP requires initialize and ignores premature notifications", async () => 
     assert.equal(responses[0].error.code, -32002);
     assert.equal(responses[1].result.protocolVersion, "2025-11-25");
     assert.equal(responses[1].result.serverInfo.name, "shadowbill");
+    assert.match(responses[1].result.instructions, /shadowbill_repository_report/);
     assert.equal(responses[2].error.code, -32600);
     assert.deepEqual(responses[3].result, {});
   } finally {
@@ -77,7 +78,7 @@ test("MCP requires initialize and ignores premature notifications", async () => 
   }
 });
 
-test("MCP read-only mode lists daily and range tools", async () => {
+test("MCP read-only mode lists daily, range, and repository tools", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-mcp-report-"));
   const store = new JsonlEventStore(join(directory, "events.jsonl"));
   await store.append({
@@ -89,6 +90,19 @@ test("MCP read-only mode lists daily and range tools", async () => {
     reasoningEffort: "high",
     visibleInputTokens: 100_000,
     visibleOutputTokens: 10_000,
+  });
+  await store.append({
+    type: "git_commit",
+    id: "commit_seed",
+    timestamp: "2026-07-25T19:00:00Z",
+    repository: "org/repo",
+    branch: "main",
+    sha: "abc",
+    subject: "Ship",
+    additions: 100,
+    deletions: 10,
+    changedFiles: 2,
+    addedCodeTokens: 250,
   });
 
   try {
@@ -118,15 +132,26 @@ test("MCP read-only mode lists daily and range tools", async () => {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
-        params: { name: "shadowbill_range_report", arguments: { days: 0 } },
+        params: {
+          name: "shadowbill_repository_report",
+          arguments: { endDate: "2026-07-25", days: 7, timezone: "America/Los_Angeles" },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: { name: "shadowbill_repository_report", arguments: { days: 0 } },
       },
     ]);
     assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), [
       "shadowbill_daily_report",
       "shadowbill_range_report",
+      "shadowbill_repository_report",
     ]);
     assert.equal(responses[1].result.tools[0].annotations.readOnlyHint, true);
     assert.equal(responses[1].result.tools[1].annotations.readOnlyHint, true);
+    assert.equal(responses[1].result.tools[2].annotations.readOnlyHint, true);
     assert.equal(responses[2].result.isError, false);
     assert.equal(responses[2].result.structuredContent.chatTurns, 1);
     assert.equal(responses[2].result.structuredContent.visibleInputTokens, 100_000);
@@ -135,7 +160,13 @@ test("MCP read-only mode lists daily and range tools", async () => {
     assert.equal(responses[3].result.structuredContent.calendarDays, 7);
     assert.equal(responses[3].result.structuredContent.endDate, "2026-07-25");
     assert.equal(responses[3].result.structuredContent.chatTurns, 1);
-    assert.equal(responses[4].result.isError, true);
+    assert.equal(responses[4].result.isError, false);
+    assert.equal(responses[4].result.structuredContent.allocationBasis, "same-day-added-code-tokens");
+    assert.equal(responses[4].result.structuredContent.repositoryCount, 1);
+    assert.equal(responses[4].result.structuredContent.repositories[0].repository, "org/repo");
+    assert.equal(responses[4].result.structuredContent.allocatedWorkingEstimate, responses[4].result.structuredContent.workingEstimate);
+    assert.match(responses[4].result.structuredContent.interpretation, /not causal/);
+    assert.equal(responses[5].result.isError, true);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -175,6 +206,7 @@ test("MCP aggregate writes are opt-in, idempotent, and content-minimized", async
     assert.deepEqual(responses[1].result.tools.map((tool) => tool.name), [
       "shadowbill_daily_report",
       "shadowbill_range_report",
+      "shadowbill_repository_report",
       "shadowbill_record_chat_turn",
     ]);
     assert.equal(responses[2].result.structuredContent.duplicate, false);

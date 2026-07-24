@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { buildRangeReport } from "./range.js";
+import { buildRepositoryAllocationReport } from "./repositories.js";
 
 const SERVER_VERSION = "0.3.0";
 const CURRENT_PROTOCOL_VERSION = "2025-11-25";
@@ -49,6 +50,43 @@ const RANGE_REPORT_TOOL = {
   name: "shadowbill_range_report",
   title: "Shadowbill Rolling Report",
   description: "Read aggregate AI cost and software-delivery metrics for a rolling calendar-day range.",
+  inputSchema: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      endDate: {
+        type: "string",
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+        description: "Inclusive end date in YYYY-MM-DD format. Defaults to today in the selected timezone.",
+      },
+      days: {
+        type: "integer",
+        minimum: 1,
+        maximum: 365,
+        description: "Number of inclusive calendar days. Defaults to 7.",
+      },
+      timezone: {
+        type: "string",
+        minLength: 1,
+        maxLength: 100,
+        description: "IANA timezone such as America/Los_Angeles. Defaults to the server configuration.",
+      },
+    },
+  },
+  annotations: {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  execution: { taskSupport: "forbidden" },
+};
+
+const REPOSITORY_REPORT_TOOL = {
+  name: "shadowbill_repository_report",
+  title: "Shadowbill Repository Allocation Report",
+  description: "Read heuristic repository-level cost allocation and software-delivery metrics for a rolling calendar-day range.",
   inputSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -292,6 +330,22 @@ export function createShadowbillMcpSession(options) {
       return toolResult(report);
     }
 
+    if (name === REPOSITORY_REPORT_TOOL.name) {
+      const validated = validateRangeArguments(args);
+      if (validated.error) return toolError(validated.error);
+      const timeZone = validated.value.timezone ?? options.timeZone;
+      const endDate = validated.value.endDate ?? dateInTimeZone(new Date().toISOString(), timeZone);
+      const report = buildRepositoryAllocationReport(
+        await options.store.readAll(),
+        endDate,
+        validated.value.days,
+        options.pricing,
+        profile,
+        timeZone,
+      );
+      return toolResult(report);
+    }
+
     if (name === RECORD_CHAT_TURN_TOOL.name && options.allowWrites) {
       const validated = validateChatArguments(args);
       if (validated.error) return toolError(validated.error);
@@ -348,7 +402,7 @@ export function createShadowbillMcpSession(options) {
           protocolVersion: selectedProtocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "shadowbill", version: SERVER_VERSION },
-          instructions: "Use shadowbill_daily_report for one day or shadowbill_range_report for rolling aggregate cost and delivery metrics. Aggregate writes appear only when the server is explicitly started with write access.",
+          instructions: "Use shadowbill_daily_report for one day, shadowbill_range_report for rolling aggregate metrics, or shadowbill_repository_report for heuristic repository allocation. Aggregate writes appear only when the server is explicitly started with write access.",
         });
       }
 
@@ -362,7 +416,7 @@ export function createShadowbillMcpSession(options) {
         if (message.params?.cursor !== undefined && typeof message.params.cursor !== "string") {
           return rpcError(message.id, -32602, "tools/list cursor must be a string");
         }
-        const readTools = [DAILY_REPORT_TOOL, RANGE_REPORT_TOOL];
+        const readTools = [DAILY_REPORT_TOOL, RANGE_REPORT_TOOL, REPOSITORY_REPORT_TOOL];
         const tools = options.allowWrites ? [...readTools, RECORD_CHAT_TURN_TOOL] : readTools;
         return rpcResult(message.id, { tools });
       }
