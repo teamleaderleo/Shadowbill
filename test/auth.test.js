@@ -26,6 +26,7 @@ test("collector tokens are stable and stored with restrictive permissions", asyn
 test("bearer verification rejects missing, malformed, and incorrect tokens", () => {
   const token = "a".repeat(43);
   assert.equal(verifyBearerAuthorization(`Bearer ${token}`, token), true);
+  assert.equal(verifyBearerAuthorization(`bearer ${token}`, token), true);
   assert.equal(verifyBearerAuthorization(undefined, token), false);
   assert.equal(verifyBearerAuthorization(token, token), false);
   assert.equal(verifyBearerAuthorization("Bearer wrong", token), false);
