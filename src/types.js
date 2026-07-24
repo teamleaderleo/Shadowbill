@@ -5,6 +5,8 @@
  * @property {'chat_turn'} type
  * @property {string} id
  * @property {string} timestamp
+ * @property {string=} capturedAt
+ * @property {string=} logicalTurnHash
  * @property {string} conversationHash
  * @property {string} model
  * @property {ReasoningEffort} reasoningEffort

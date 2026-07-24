@@ -83,6 +83,62 @@ export function dateInTimeZone(isoTimestamp, timeZone) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+/**
+ * Resolves append-only browser captures into one latest estimate per logical turn.
+ * The earliest turn timestamp is retained so a later revision stays attributed to
+ * the day on which the turn first appeared.
+ * @param {import('./types.js').ShadowbillEvent[]} events
+ */
+export function resolveChatTurnRevisions(events) {
+  const records = [];
+  const groups = new Map();
+
+  for (const event of events) {
+    if (event.type !== "chat_turn") continue;
+    if (!event.logicalTurnHash) {
+      records.push({ turn: event, revisionCount: 1 });
+      continue;
+    }
+
+    const key = `${event.conversationHash}:${event.logicalTurnHash}`;
+    const capturedAt = Date.parse(event.capturedAt ?? event.timestamp);
+    const timestamp = Date.parse(event.timestamp);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        latest: event,
+        latestCapturedAt: capturedAt,
+        earliestTimestamp: timestamp,
+        revisionCount: 1,
+      });
+      continue;
+    }
+
+    existing.revisionCount += 1;
+    existing.earliestTimestamp = Math.min(existing.earliestTimestamp, timestamp);
+    if (capturedAt > existing.latestCapturedAt ||
+        (capturedAt === existing.latestCapturedAt && event.id > existing.latest.id)) {
+      existing.latest = event;
+      existing.latestCapturedAt = capturedAt;
+    }
+  }
+
+  for (const group of groups.values()) {
+    records.push({
+      turn: {
+        ...group.latest,
+        timestamp: new Date(group.earliestTimestamp).toISOString(),
+      },
+      revisionCount: group.revisionCount,
+    });
+  }
+
+  return records.sort((left, right) => {
+    const timestampDifference = Date.parse(left.turn.timestamp) - Date.parse(right.turn.timestamp);
+    return timestampDifference || left.turn.id.localeCompare(right.turn.id);
+  });
+}
+
 function perOutcome(cost, count) {
   return count === 0 ? null : cost / count;
 }
@@ -94,8 +150,10 @@ function perOutcome(cost, count) {
  * @param {import('./types.js').EstimationProfile} [workingProfile]
  */
 export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT_WORKING_PROFILE, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  const dayEvents = events.filter((event) => dateInTimeZone(event.timestamp, timeZone) === date);
-  const chats = dayEvents.filter((event) => event.type === "chat_turn");
+  const chatRecords = resolveChatTurnRevisions(events)
+    .filter((record) => dateInTimeZone(record.turn.timestamp, timeZone) === date);
+  const chats = chatRecords.map((record) => record.turn);
+  const dayEvents = events.filter((event) => event.type !== "chat_turn" && dateInTimeZone(event.timestamp, timeZone) === date);
   const commits = dayEvents.filter((event) => event.type === "git_commit");
   const pushes = dayEvents.filter((event) => event.type === "github_push");
   const pullRequests = dayEvents.filter((event) => event.type === "github_pull_request");
@@ -116,10 +174,13 @@ export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT
   const repositoryNames = dayEvents
     .filter((event) => "repository" in event && typeof event.repository === "string")
     .map((event) => event.repository);
+  const chatRevisionEvents = sum(chatRecords.map((record) => record.revisionCount));
 
   return {
     date,
     chatTurns: chats.length,
+    chatRevisionEvents,
+    supersededChatRevisions: chatRevisionEvents - chats.length,
     conversations: new Set(chats.map((chat) => chat.conversationHash)).size,
     visibleInputTokens: sum(chats.map((chat) => chat.visibleInputTokens)),
     visibleOutputTokens: sum(chats.map((chat) => chat.visibleOutputTokens)),

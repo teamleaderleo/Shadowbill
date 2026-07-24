@@ -14,6 +14,7 @@ class HttpError extends Error {
 const REASONING_EFFORTS = new Set(["none", "low", "medium", "high", "xhigh", "max", "unknown"]);
 const BROWSER_EVENT_ID = /^chat_[a-f0-9]{24}$/i;
 const CONVERSATION_HASH = /^[a-f0-9]{24}$/i;
+const LOGICAL_TURN_HASH = /^[a-f0-9]{24}$/i;
 const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
 const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
 
@@ -64,10 +65,20 @@ function normalizeBrowserChatEvent(value) {
   if (value.collectorVersion !== undefined &&
       (typeof value.collectorVersion !== "string" || !COLLECTOR_VERSION.test(value.collectorVersion))) return null;
 
+  const hasRevisionFields = value.logicalTurnHash !== undefined || value.capturedAt !== undefined;
+  if (hasRevisionFields) {
+    if (typeof value.logicalTurnHash !== "string" || !LOGICAL_TURN_HASH.test(value.logicalTurnHash)) return null;
+    if (typeof value.capturedAt !== "string" || Number.isNaN(Date.parse(value.capturedAt))) return null;
+  }
+
   return {
     type: "chat_turn",
     id: value.id.toLowerCase(),
     timestamp: new Date(value.timestamp).toISOString(),
+    ...(hasRevisionFields ? {
+      capturedAt: new Date(value.capturedAt).toISOString(),
+      logicalTurnHash: value.logicalTurnHash.toLowerCase(),
+    } : {}),
     conversationHash: value.conversationHash.toLowerCase(),
     model: value.model,
     reasoningEffort: value.reasoningEffort,
@@ -106,7 +117,7 @@ export function createCollectorServer(options) {
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/health") {
-        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.2.1" });
+        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.3.0" });
         return;
       }
 
