@@ -10,6 +10,7 @@ import { DEFAULT_ALLOWED_HOSTS } from "./http-security.js";
 import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
+import { buildRepositoryAllocationReport } from "./repositories.js";
 import { createCollectorServer, listen } from "./server.js";
 import { JsonlEventStore } from "./store.js";
 
@@ -39,6 +40,10 @@ function configuredAllowedHosts(value) {
 
 function money(value) {
   return value === null ? "—" : `$${value.toFixed(4)}`;
+}
+
+function percentage(value) {
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 function printDailyReport(report) {
@@ -95,6 +100,33 @@ function printRangeReport(report) {
   console.log(`Working cost / deployment  ${money(report.costPerSuccessfulDeployment)}`);
   console.log(`Peak chat day              ${report.peakChatTurnDay ? `${report.peakChatTurnDay.date} (${report.peakChatTurnDay.value})` : "—"}`);
   console.log(`Peak cost day              ${report.peakWorkingCostDay ? `${report.peakWorkingCostDay.date} (${money(report.peakWorkingCostDay.value)})` : "—"}`);
+}
+
+function printRepositoryReport(report) {
+  console.log(`Shadowbill repositories — ${report.startDate} through ${report.endDate}`);
+  console.log("");
+  console.log(`Allocation basis           ${report.allocationBasis}`);
+  console.log(`Working estimate           ${money(report.workingEstimate)}`);
+  console.log(`Allocated estimate         ${money(report.allocatedWorkingEstimate)}`);
+  console.log(`Unallocated estimate       ${money(report.unallocatedWorkingEstimate)}`);
+  console.log(`Allocation coverage        ${percentage(report.allocationCoverage)}`);
+  console.log(`Repositories               ${report.repositoryCount}`);
+
+  for (const repository of report.repositories) {
+    console.log("");
+    console.log(repository.repository);
+    console.log(`  Allocated estimate       ${money(repository.allocatedWorkingEstimate)}`);
+    console.log(`  Retained code tokens     ${repository.addedCodeTokens.toLocaleString()}`);
+    console.log(`  Commits                  ${repository.commits}`);
+    console.log(`  Merged pull requests     ${repository.mergedPullRequests}`);
+    console.log(`  Successful CI runs       ${repository.successfulWorkflowRuns}`);
+    console.log(`  Successful deployments  ${repository.successfulDeployments}`);
+    console.log(`  Cost / commit            ${money(repository.costPerCommit)}`);
+    console.log(`  Cost / merged PR         ${money(repository.costPerMergedPullRequest)}`);
+  }
+
+  console.log("");
+  console.log(report.interpretation);
 }
 
 async function main() {
@@ -162,10 +194,14 @@ async function main() {
     const endDate = argument("--date") ?? dateInTimeZone(new Date().toISOString(), timeZone);
     const days = reportDays(argument("--days"));
     calendarDateRange(endDate, days);
-    const report = days === 1
-      ? buildDailyReport(events, endDate, pricing, DEFAULT_WORKING_PROFILE, timeZone)
-      : buildRangeReport(events, endDate, days, pricing, DEFAULT_WORKING_PROFILE, timeZone);
+    const byRepository = process.argv.includes("--by-repository");
+    const report = byRepository
+      ? buildRepositoryAllocationReport(events, endDate, days, pricing, DEFAULT_WORKING_PROFILE, timeZone)
+      : days === 1
+        ? buildDailyReport(events, endDate, pricing, DEFAULT_WORKING_PROFILE, timeZone)
+        : buildRangeReport(events, endDate, days, pricing, DEFAULT_WORKING_PROFILE, timeZone);
     if (process.argv.includes("--json")) console.log(JSON.stringify(report, null, 2));
+    else if (byRepository) printRepositoryReport(report);
     else if (days === 1) printDailyReport(report);
     else printRangeReport(report);
     return;
@@ -185,7 +221,7 @@ async function main() {
     return;
   }
 
-  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or SHADOWBILL_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
+  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or SHADOWBILL_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
 }
 
 main().catch((error) => {
