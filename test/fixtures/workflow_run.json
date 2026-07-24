@@ -1,0 +1,13 @@
+{
+  "repository": { "full_name": "owner/repo" },
+  "workflow_run": {
+    "id": 9001,
+    "name": "CI",
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "ccccccc",
+    "run_attempt": 2,
+    "run_started_at": "2026-07-25T18:01:00Z",
+    "updated_at": "2026-07-25T18:04:30Z"
+  }
+}
