@@ -66,7 +66,7 @@ export function normalizeGitHubWebhook(eventName, deliveryId, payload, receivedA
       branch: ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref,
       before: string(payload.before),
       after: string(payload.after),
-      commitCount: Array.isArray(payload.commits) ? payload.commits.length : number(payload.size),
+      commitCount: number(payload.size) || (Array.isArray(payload.commits) ? payload.commits.length : 0),
       created: Boolean(payload.created),
       deleted: Boolean(payload.deleted),
       forced: Boolean(payload.forced),
