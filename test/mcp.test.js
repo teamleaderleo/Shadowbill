@@ -11,7 +11,7 @@ import { JsonlEventStore } from "../src/store.js";
 const cliPath = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
 async function connect(dataPath, allowWrites = false) {
-  const env = { ...process.env };
+  const env = Object.fromEntries(Object.entries(process.env).filter((entry) => typeof entry[1] === "string"));
   delete env.SHADOWBILL_MCP_ALLOW_WRITES;
   if (allowWrites) env.SHADOWBILL_MCP_ALLOW_WRITES = "1";
 
@@ -23,7 +23,7 @@ async function connect(dataPath, allowWrites = false) {
   });
   const client = new Client({ name: "shadowbill-test", version: "1.0.0" });
   await client.connect(transport);
-  return { client, transport };
+  return client;
 }
 
 function textResult(result) {
@@ -47,7 +47,7 @@ test("MCP is read-only by default and returns daily reports", async () => {
     visibleOutputTokens: 10_000,
   });
 
-  const { client } = await connect(dataPath);
+  const client = await connect(dataPath);
   try {
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name), ["shadowbill_daily_report"]);
@@ -71,7 +71,7 @@ test("MCP is read-only by default and returns daily reports", async () => {
 test("MCP aggregate chat writes require opt-in and deduplicate", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-mcp-write-"));
   const dataPath = join(directory, "events.jsonl");
-  const { client } = await connect(dataPath, true);
+  const client = await connect(dataPath, true);
   const input = {
     conversationKey: "private-conversation-id",
     model: "gpt-5.6-sol",
