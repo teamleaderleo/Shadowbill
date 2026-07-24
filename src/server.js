@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { URL } from "node:url";
 import { verifyBearerAuthorization } from "./auth.js";
+import { dashboardResponse, isDashboardPath } from "./dashboard.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
 import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
@@ -26,6 +27,11 @@ function sendJson(response, status, value, headers = {}) {
     ...headers,
   });
   response.end(status === 204 ? undefined : JSON.stringify(value));
+}
+
+function sendAsset(request, response, asset) {
+  response.writeHead(asset.status, asset.headers);
+  response.end(request.method === "HEAD" ? undefined : asset.body);
 }
 
 async function readBody(request, maximumBytes) {
@@ -139,6 +145,11 @@ export function createCollectorServer(options) {
 
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       routeHeaders = browserCorsHeaders(url.pathname);
+
+      if ((request.method === "GET" || request.method === "HEAD") && isDashboardPath(url.pathname)) {
+        sendAsset(request, response, await dashboardResponse(url.pathname));
+        return;
+      }
 
       if (request.method === "OPTIONS") {
         if (Object.keys(routeHeaders).length === 0) {
