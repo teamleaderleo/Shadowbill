@@ -2,9 +2,9 @@
 
 **A compute reckoner for unmetered AI.**
 
-Shadowbill estimates the API-equivalent cost of subscription AI usage from observable activity. The first release combines a local ChatGPT browser collector with commit-diff telemetry and produces daily lower-bound, visible, and working estimates.
+Shadowbill estimates the API-equivalent cost of subscription AI usage from observable activity. It combines a local ChatGPT browser collector, commit-diff telemetry, and signed GitHub delivery events to produce daily lower-bound, visible, and working estimates.
 
-It records aggregate token counts and repository events. Conversation text stays in the browser.
+It records aggregate token counts and delivery metadata. Conversation text and source patches stay out of the ledger.
 
 ## What it measures
 
@@ -12,8 +12,9 @@ It records aggregate token counts and repository events. Conversation text stays
 - Visible conversation-context and response token estimates
 - Model and reasoning settings supplied by the user
 - Tokens added in local Git commits
+- GitHub pushes, merged pull requests, workflow outcomes, and deployments
 - Daily API-equivalent cost ranges
-- Estimated cost per commit and retained code token
+- Estimated cost per commit, merged PR, successful CI run, deployment, and retained code token
 
 ## Current estimation profiles
 
@@ -56,6 +57,32 @@ Or machine-readable output:
 node src/cli.js report --json
 ```
 
+Set an explicit reporting timezone when the collector runs on a server or inside a container:
+
+```bash
+SHADOWBILL_TIMEZONE=America/Los_Angeles npm run serve
+node src/cli.js report --timezone America/Los_Angeles
+```
+
+## GitHub webhooks
+
+Start the collector with a webhook secret:
+
+```bash
+SHADOWBILL_GITHUB_WEBHOOK_SECRET='replace-me' npm run serve
+```
+
+Configure a GitHub App or repository webhook with:
+
+- Payload URL: `https://your-host.example/v1/github/webhooks`
+- Content type: `application/json`
+- Secret: the same value supplied to Shadowbill
+- Events: pushes, pull requests, workflow runs, and deployment statuses
+
+The collector verifies `X-Hub-Signature-256` before parsing or storing a delivery. GitHub delivery IDs provide idempotency for redeliveries. Unsupported event types receive an accepted-and-ignored response.
+
+The HTTP server binds to loopback. A hosted setup should place a TLS reverse proxy in front of it and forward only the webhook route.
+
 ## Example
 
 ```text
@@ -66,6 +93,10 @@ Conversations              11
 Visible input tokens       2,480,000
 Visible output tokens      318,000
 Commits                    9
+Pushes                     14
+Merged pull requests       6
+Successful workflow runs   11
+Successful deployments     8
 Repositories               4
 Added code tokens          34,700
 
@@ -74,13 +105,18 @@ Visible cached floor       $10.7800
 Visible uncached estimate  $21.9400
 Working estimate           $28.7480
 Working cost / commit      $3.1942
+Working cost / merged PR   $4.7913
+Working cost / CI success  $2.6135
+Working cost / deployment  $3.5935
 ```
 
 ## Privacy boundary
 
 The browser adapter calculates token estimates before sending an event. Stored chat events contain a conversation hash, timestamp, model label, reasoning label, and aggregate counts. Raw prompts and responses are excluded.
 
-Git events contain commit metadata, diff statistics, and an estimated token count for added lines. Added source text is discarded after tokenization.
+Local Git events contain commit metadata, diff statistics, and an estimated token count for added lines. Added source text is discarded after tokenization.
+
+GitHub events contain repository names, SHAs, refs, numeric counts, statuses, timestamps, environments, and delivery IDs. Source patches, PR descriptions, comments, logs, and deployment URLs are excluded.
 
 ## Accuracy
 
@@ -88,10 +124,11 @@ Shadowbill reports API-equivalent estimates. Consumer ChatGPT does not expose ca
 
 ## Near-term work
 
-- GitHub App webhook adapter for pushes, pull requests, CI, and deployments
-- MCP event adapter
+- MCP event adapter and report tools
 - Better model-specific tokenizers
 - Rolling calibration from visible output to retained code
+- Browser completion detection for long streaming responses
+- Collector authentication for browser-originated events
 - Local dashboard and weekly trends
 
 ## Development
