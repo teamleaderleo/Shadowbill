@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
+import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
 import { createCollectorServer, listen } from "./server.js";
 import { JsonlEventStore } from "./store.js";
@@ -64,6 +65,18 @@ async function main() {
     return;
   }
 
+  if (command === "mcp") {
+    const allowWrites = process.argv.includes("--allow-writes") || process.env.SHADOWBILL_MCP_ALLOW_WRITES === "1";
+    await runShadowbillMcpStdioServer({
+      store,
+      pricing,
+      profile: DEFAULT_WORKING_PROFILE,
+      timeZone,
+      allowWrites,
+    });
+    return;
+  }
+
   if (command === "report") {
     const report = buildDailyReport(
       await store.readAll(),
@@ -91,7 +104,7 @@ async function main() {
     return;
   }
 
-  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET]\n  report [--date YYYY-MM-DD] [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)`);
+  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
 }
 
 main().catch((error) => {
