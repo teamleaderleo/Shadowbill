@@ -21,8 +21,10 @@
     return -1;
   }
 
-  function turnSource({ conversationPath, messageId, ordinal }) {
-    const stableMessagePart = messageId && messageId.trim() ? `message:${messageId.trim()}` : `assistant:${ordinal}`;
+  function turnSource({ conversationPath, messageId, ordinal, fallbackAnchor = "" }) {
+    const stableMessagePart = messageId && messageId.trim()
+      ? `message:${messageId.trim()}`
+      : `assistant:${ordinal}:anchor:${fallbackAnchor}`;
     return `${conversationPath}:${stableMessagePart}`;
   }
 
