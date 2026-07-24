@@ -7,6 +7,7 @@ const state = {
 const number = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 1 });
 const integer = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 0 });
 const compact = new Intl.NumberFormat("en-CA", { notation: "compact", maximumFractionDigits: 1 });
+const percent = new Intl.NumberFormat("en-CA", { style: "percent", maximumFractionDigits: 1 });
 const money = new Intl.NumberFormat("en-CA", {
   style: "currency",
   currency: "USD",
@@ -28,15 +29,27 @@ function formatMoney(value, precise = false) {
   return value === null || value === undefined ? "—" : (precise ? moneyPrecise : money).format(value);
 }
 
+function formatPercentage(value) {
+  return value === null || value === undefined ? "—" : percent.format(value);
+}
+
 function formatDate(value) {
   if (!value) return "—";
   return dateLabel.format(new Date(`${value}T00:00:00.000Z`));
 }
 
-function reportUrl() {
+function reportUrl(group = "") {
   const params = new URLSearchParams({ days: String(state.days), timezone: state.timezone });
   if (state.endDate) params.set("date", state.endDate);
+  if (group) params.set("group", group);
   return `/v1/report?${params}`;
+}
+
+async function fetchReport(group = "") {
+  const response = await fetch(reportUrl(group), { headers: { accept: "application/json" }, cache: "no-store" });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || `Collector returned ${response.status}`);
+  return value;
 }
 
 function normalizeReport(value) {
@@ -204,6 +217,41 @@ function renderTable(report) {
   }
 }
 
+function renderRepositories(report) {
+  setText("allocated-cost", formatMoney(report.allocatedWorkingEstimate));
+  setText("unallocated-cost", formatMoney(report.unallocatedWorkingEstimate));
+  setText("allocation-coverage", formatPercentage(report.allocationCoverage));
+  setText("allocated-days", `${integer.format(report.allocationDays)} allocation days`);
+  setText("unallocated-days", `${integer.format(report.unallocatedDays)} days without retained-code evidence`);
+  setText("allocation-repositories", `${integer.format(report.repositoryCount)} repositories`);
+  setText("repository-basis", report.allocationBasis);
+  setText("allocation-note", report.interpretation);
+
+  const repositories = [...(report.repositories ?? [])].sort((left, right) =>
+    right.allocatedWorkingEstimate - left.allocatedWorkingEstimate || left.repository.localeCompare(right.repository));
+  const body = byId("repository-rows");
+  const empty = byId("repository-empty");
+  const table = byId("repository-table-wrap");
+  body.replaceChildren();
+  empty.hidden = repositories.length > 0;
+  table.hidden = repositories.length === 0;
+
+  for (const repository of repositories) {
+    const row = document.createElement("tr");
+    row.append(
+      tableCell(repository.repository),
+      tableCell(formatMoney(repository.allocatedWorkingEstimate)),
+      tableCell(integer.format(repository.addedCodeTokens)),
+      tableCell(integer.format(repository.commits)),
+      tableCell(integer.format(repository.mergedPullRequests)),
+      tableCell(integer.format(repository.successfulWorkflowRuns)),
+      tableCell(integer.format(repository.successfulDeployments)),
+      tableCell(formatMoney(repository.costPerCommit, true)),
+    );
+    body.append(row);
+  }
+}
+
 function syncControls(report) {
   byId("days-input").value = String(report.calendarDays);
   byId("end-date-input").value = report.endDate;
@@ -218,13 +266,15 @@ async function loadReport() {
   errorPanel.hidden = true;
   setStatus("", "Refreshing");
   try {
-    const response = await fetch(reportUrl(), { headers: { accept: "application/json" }, cache: "no-store" });
-    const value = await response.json();
-    if (!response.ok) throw new Error(value.error || `Collector returned ${response.status}`);
-    const report = normalizeReport(value);
+    const [rawReport, repositoryReport] = await Promise.all([
+      fetchReport(),
+      fetchReport("repository"),
+    ]);
+    const report = normalizeReport(rawReport);
     renderMetrics(report);
     renderChart(report);
     renderTable(report);
+    renderRepositories(repositoryReport);
     syncControls(report);
     setStatus("online", "Collector online");
     setText("updated-at", `Updated ${new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })}`);
