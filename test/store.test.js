@@ -56,6 +56,14 @@ test("uses owner-only ledger permissions", async () => {
   });
 });
 
+test("reads CRLF ledgers with blank separator lines", async () => {
+  await temporaryStore(async ({ path }) => {
+    const second = { ...event, id: "chat_second" };
+    await writeFile(path, `${JSON.stringify(event)}\r\n\r\n${JSON.stringify(second)}\r\n`, "utf8");
+    assert.deepEqual(await new JsonlEventStore(path).readAll(), [event, second]);
+  });
+});
+
 test("preserves a valid unterminated record before appending", async () => {
   await temporaryStore(async ({ path }) => {
     await writeFile(path, JSON.stringify(event), "utf8");
@@ -100,5 +108,15 @@ test("recovers a stale lock directory", async () => {
     const store = new JsonlEventStore(path, { staleLockMs: 10, lockTimeoutMs: 1_000, retryDelayMs: 1 });
     assert.equal(await store.append(event), true);
     assert.deepEqual(await store.readAll(), [event]);
+  });
+});
+
+test("times out without removing a live lock", async () => {
+  await temporaryStore(async ({ path }) => {
+    const lockPath = `${path}.lock`;
+    await mkdir(lockPath);
+    const store = new JsonlEventStore(path, { staleLockMs: 60_000, lockTimeoutMs: 25, retryDelayMs: 2 });
+    await assert.rejects(store.append(event), /Timed out waiting for ledger lock/);
+    assert.equal((await stat(lockPath)).isDirectory(), true);
   });
 });
