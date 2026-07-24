@@ -66,13 +66,40 @@ export function buildRangeReport(
 ) {
   const dates = calendarDateRange(endDate, days);
   const dateSet = new Set(dates);
-  const daily = dates.map((date) => buildDailyReport(events, date, pricing, workingProfile, timeZone));
+  const buckets = new Map(dates.map((date) => [date, { events: [], revisionEvents: 0 }]));
+  const resolvedTurnRecords = resolveChatTurnRevisions(events);
+
+  for (const record of resolvedTurnRecords) {
+    const date = dateInTimeZone(record.turn.timestamp, timeZone);
+    const bucket = buckets.get(date);
+    if (!bucket) continue;
+    bucket.events.push(record.turn);
+    bucket.revisionEvents += record.revisionCount;
+  }
+
+  const rangeEvents = [];
+  for (const event of events) {
+    if (event.type === "chat_turn") continue;
+    const date = dateInTimeZone(event.timestamp, timeZone);
+    const bucket = buckets.get(date);
+    if (!bucket) continue;
+    bucket.events.push(event);
+    rangeEvents.push(event);
+  }
+
+  const daily = dates.map((date) => {
+    const bucket = buckets.get(date);
+    const report = buildDailyReport(bucket.events, date, pricing, workingProfile, timeZone);
+    return {
+      ...report,
+      chatRevisionEvents: bucket.revisionEvents,
+      supersededChatRevisions: bucket.revisionEvents - report.chatTurns,
+    };
+  });
   const activeDays = daily.filter(active).length;
-  const inRange = (event) => dateSet.has(dateInTimeZone(event.timestamp, timeZone));
-  const rangeEvents = events.filter((event) => event.type !== "chat_turn" && inRange(event));
-  const rangeTurns = resolveChatTurnRevisions(events)
+  const rangeTurns = resolvedTurnRecords
     .map((record) => record.turn)
-    .filter(inRange);
+    .filter((turn) => dateSet.has(dateInTimeZone(turn.timestamp, timeZone)));
   const uniqueCount = (values) => new Set(values).size;
   const mergedPullRequests = uniqueCount(rangeEvents
     .filter((event) => event.type === "github_pull_request" && event.merged)
