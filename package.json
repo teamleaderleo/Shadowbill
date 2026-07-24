@@ -1,0 +1,18 @@
+{
+  "name": "shadowbill",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A compute reckoner for unmetered AI.",
+  "type": "module",
+  "bin": {
+    "shadowbill": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "node src/cli.js serve",
+    "report": "node src/cli.js report"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
