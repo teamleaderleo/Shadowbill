@@ -101,7 +101,7 @@ function safeInteger(value) {
 }
 
 function validRequestId(value) {
-  return typeof value === "string" || typeof value === "number";
+  return typeof value === "string" || Number.isSafeInteger(value);
 }
 
 function validDate(value) {
@@ -287,6 +287,9 @@ export function createShadowbillMcpSession(options) {
       if (message.method === "tools/list") {
         if (message.params !== undefined && !isObject(message.params)) {
           return rpcError(message.id, -32602, "Invalid tools/list parameters");
+        }
+        if (message.params?.cursor !== undefined && typeof message.params.cursor !== "string") {
+          return rpcError(message.id, -32602, "tools/list cursor must be a string");
         }
         const tools = options.allowWrites ? [DAILY_REPORT_TOOL, RECORD_CHAT_TURN_TOOL] : [DAILY_REPORT_TOOL];
         return rpcResult(message.id, { tools });
