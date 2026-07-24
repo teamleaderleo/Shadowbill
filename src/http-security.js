@@ -58,6 +58,6 @@ export function browserCorsHeaders(pathname) {
   return {
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "authorization,content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": pathname === "/v1/auth/check" ? "GET,OPTIONS" : "POST,OPTIONS",
   };
 }
