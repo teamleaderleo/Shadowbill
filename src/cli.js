@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-import { homedir } from "node:os";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadOrCreateCollectorToken } from "./auth.js";
 import { buildDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
 import { DEFAULT_ALLOWED_HOSTS } from "./http-security.js";
+import {
+  ENVIRONMENT_ALIASES,
+  LEGACY_NAME,
+  PRODUCT_NAME,
+  resolveStorageIdentity,
+  selectCompatibleEnvironment,
+} from "./identity.js";
 import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
@@ -47,7 +52,7 @@ function percentage(value) {
 }
 
 function printDailyReport(report) {
-  console.log(`Shadowbill — ${report.date}`);
+  console.log(`${PRODUCT_NAME} — ${LEGACY_NAME} estimates — ${report.date}`);
   console.log("");
   console.log(`Chat turns                 ${report.chatTurns}`);
   console.log(`Chat capture events        ${report.chatRevisionEvents}`);
@@ -74,7 +79,7 @@ function printDailyReport(report) {
 }
 
 function printRangeReport(report) {
-  console.log(`Shadowbill — ${report.startDate} through ${report.endDate}`);
+  console.log(`${PRODUCT_NAME} — ${LEGACY_NAME} estimates — ${report.startDate} through ${report.endDate}`);
   console.log("");
   console.log(`Calendar days              ${report.calendarDays}`);
   console.log(`Active days                ${report.activeDays}`);
@@ -103,7 +108,7 @@ function printRangeReport(report) {
 }
 
 function printRepositoryReport(report) {
-  console.log(`Shadowbill repositories — ${report.startDate} through ${report.endDate}`);
+  console.log(`${PRODUCT_NAME} — ${LEGACY_NAME} repository estimates — ${report.startDate} through ${report.endDate}`);
   console.log("");
   console.log(`Allocation basis           ${report.allocationBasis}`);
   console.log(`Working estimate           ${money(report.workingEstimate)}`);
@@ -129,25 +134,101 @@ function printRepositoryReport(report) {
   console.log(report.interpretation);
 }
 
+function selectEnvironment(key) {
+  const [primaryName, legacyName] = ENVIRONMENT_ALIASES[key];
+  return selectCompatibleEnvironment(process.env, primaryName, legacyName);
+}
+
+function printCompatibilityWarnings(warnings) {
+  for (const warning of [...new Set(warnings)]) {
+    console.error(`${PRODUCT_NAME} compatibility: ${warning}`);
+  }
+}
+
 async function main() {
   const command = process.argv[2] ?? "help";
-  const dataPath = resolve(argument("--data") ?? process.env.SHADOWBILL_DATA ?? `${homedir()}/.shadowbill/events.jsonl`);
-  const tokenPath = resolve(argument("--collector-token-file") ?? process.env.SHADOWBILL_COLLECTOR_TOKEN_FILE ?? `${homedir()}/.shadowbill/collector-token`);
+  const storage = await resolveStorageIdentity({
+    explicitDataPath: argument("--data"),
+    explicitTokenPath: argument("--collector-token-file"),
+  });
+  const collectorTokenEnvironment = selectEnvironment("collectorToken");
+  const timeZoneEnvironment = selectEnvironment("timezone");
+  const githubSecretEnvironment = selectEnvironment("githubWebhookSecret");
+  const allowedHostsEnvironment = selectEnvironment("allowedHosts");
+  const mcpWritesEnvironment = selectEnvironment("mcpAllowWrites");
+  const compatibilityWarnings = [
+    ...storage.warnings,
+    ...collectorTokenEnvironment.warnings,
+    ...timeZoneEnvironment.warnings,
+    ...githubSecretEnvironment.warnings,
+    ...allowedHostsEnvironment.warnings,
+    ...mcpWritesEnvironment.warnings,
+  ];
+
+  const dataPath = storage.dataPath;
+  const tokenPath = storage.tokenPath;
   const pricingPath = argument("--pricing");
   const model = argument("--model") ?? "gpt-5.6-sol";
-  const timeZone = argument("--timezone") ?? process.env.SHADOWBILL_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = argument("--timezone") ?? timeZoneEnvironment.value ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (command === "status") {
+    const status = {
+      service: "proofwake",
+      legacyAlias: "shadowbill",
+      command: "status",
+      compatibilityMode: storage.compatibilityMode,
+      configuration: {
+        dataPath,
+        dataSource: storage.dataSource,
+        tokenPath,
+        tokenPathSource: storage.tokenSource,
+        collectorTokenSource: collectorTokenEnvironment.source,
+        timeZone,
+        timeZoneSource: argument("--timezone") !== undefined ? "argument" : timeZoneEnvironment.source ?? "system",
+        githubWebhookSecretSource: githubSecretEnvironment.source,
+        allowedHostsSource: allowedHostsEnvironment.source,
+        mcpAllowWritesSource: mcpWritesEnvironment.source,
+      },
+      defaults: storage.defaults,
+      warnings: compatibilityWarnings,
+    };
+    if (process.argv.includes("--json")) console.log(JSON.stringify(status, null, 2));
+    else {
+      console.log(`${PRODUCT_NAME} identity`);
+      console.log(`Data: ${status.configuration.dataPath} (${status.configuration.dataSource})`);
+      console.log(`Collector token file: ${status.configuration.tokenPath} (${status.configuration.tokenPathSource})`);
+      console.log(`Compatibility mode: ${status.compatibilityMode ? "Shadowbill paths or variables active" : "no"}`);
+      if (status.warnings.length > 0) {
+        console.log("");
+        for (const warning of status.warnings) console.log(`Warning: ${warning}`);
+      }
+    }
+    return;
+  }
+
+  printCompatibilityWarnings(compatibilityWarnings);
 
   if (command === "doctor") {
     const report = await buildDoctorReport({
       dataPath,
       tokenPath,
-      tokenFromEnvironment: Boolean(process.env.SHADOWBILL_COLLECTOR_TOKEN),
+      tokenFromEnvironment: collectorTokenEnvironment.value !== undefined,
       pricingPath,
       model,
       timeZone,
     });
-    if (process.argv.includes("--json")) console.log(JSON.stringify(report, null, 2));
-    else console.log(formatDoctorReport(report));
+    if (process.argv.includes("--json")) console.log(JSON.stringify({
+      ...report,
+      service: "proofwake",
+      module: "shadowbill-estimates",
+      compatibility: {
+        active: storage.compatibilityMode,
+        dataSource: storage.dataSource,
+        tokenPathSource: storage.tokenSource,
+        warnings: compatibilityWarnings,
+      },
+    }, null, 2));
+    else console.log(formatDoctorReport({ ...report, service: "proofwake" }).replace(/^Shadowbill doctor/, `${PRODUCT_NAME} doctor`));
     process.exitCode = doctorExitCode(report);
     return;
   }
@@ -159,10 +240,13 @@ async function main() {
 
   if (command === "serve") {
     const port = Number.parseInt(argument("--port") ?? "7337", 10);
-    const githubWebhookSecret = argument("--github-secret") ?? process.env.SHADOWBILL_GITHUB_WEBHOOK_SECRET;
-    const collectorToken = process.env.SHADOWBILL_COLLECTOR_TOKEN ?? await loadOrCreateCollectorToken(tokenPath);
-    const allowedHosts = configuredAllowedHosts(argument("--allowed-hosts") ?? process.env.SHADOWBILL_ALLOWED_HOSTS);
-    if (collectorToken.length < 32) throw new Error("SHADOWBILL_COLLECTOR_TOKEN must contain at least 32 characters");
+    const githubWebhookSecret = argument("--github-secret") ?? githubSecretEnvironment.value;
+    const collectorToken = collectorTokenEnvironment.value ?? await loadOrCreateCollectorToken(tokenPath);
+    const allowedHosts = configuredAllowedHosts(argument("--allowed-hosts") ?? allowedHostsEnvironment.value);
+    if (collectorToken.length < 32) {
+      const source = collectorTokenEnvironment.source ?? "collector token file";
+      throw new Error(`Collector token from ${source} must contain at least 32 characters`);
+    }
     const server = createCollectorServer({
       store,
       pricing,
@@ -173,10 +257,12 @@ async function main() {
       timeZone,
     });
     const actualPort = await listen(server, port);
-    console.log(`Shadowbill collector listening at http://127.0.0.1:${actualPort}`);
+    console.log(`${PRODUCT_NAME} collector listening at http://127.0.0.1:${actualPort}`);
     console.log(`Event log: ${dataPath}`);
-    console.log(`Browser event authentication: enabled`);
-    console.log(process.env.SHADOWBILL_COLLECTOR_TOKEN ? "Collector token source: environment" : `Collector token file: ${tokenPath}`);
+    console.log("Browser event authentication: enabled");
+    console.log(collectorTokenEnvironment.value !== undefined
+      ? `Collector token source: ${collectorTokenEnvironment.source}`
+      : `Collector token file: ${tokenPath}`);
     console.log(`Allowed HTTP hosts: ${(allowedHosts ?? DEFAULT_ALLOWED_HOSTS).join(", ")}`);
     console.log(`GitHub webhooks: ${githubWebhookSecret ? "enabled" : "disabled"}`);
     console.log(`Report timezone: ${timeZone}`);
@@ -184,7 +270,7 @@ async function main() {
   }
 
   if (command === "mcp") {
-    const allowWrites = process.argv.includes("--allow-writes") || process.env.SHADOWBILL_MCP_ALLOW_WRITES === "1";
+    const allowWrites = process.argv.includes("--allow-writes") || mcpWritesEnvironment.value === "1";
     await runShadowbillMcpStdioServer({ store, pricing, profile: DEFAULT_WORKING_PROFILE, timeZone, allowWrites });
     return;
   }
@@ -221,7 +307,7 @@ async function main() {
     return;
   }
 
-  console.log(`Shadowbill\n\nCommands:\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or SHADOWBILL_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or SHADOWBILL_COLLECTOR_TOKEN_FILE)\n  SHADOWBILL_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or SHADOWBILL_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or SHADOWBILL_TIMEZONE)\n  --allow-writes (or SHADOWBILL_MCP_ALLOW_WRITES=1)`);
+  console.log(`${PRODUCT_NAME}\n\nThe evidence trail behind every revision.\n\nCurrent commands:\n  status [--json]\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or PROOFWAKE_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or PROOFWAKE_COLLECTOR_TOKEN_FILE)\n  PROOFWAKE_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or PROOFWAKE_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or PROOFWAKE_TIMEZONE)\n  --allow-writes (or PROOFWAKE_MCP_ALLOW_WRITES=1)\n\nLegacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`);
 }
 
 main().catch((error) => {
