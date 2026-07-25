@@ -106,7 +106,7 @@
     "signal": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "requirement", "subject", "freshness", "acceptedSources"],
+      "required": ["kind", "requirement", "subject", "appliesTo", "freshness", "acceptedSources"],
       "properties": {
         "kind": {
           "enum": [
@@ -123,6 +123,18 @@
         },
         "requirement": { "enum": ["required", "optional"] },
         "subject": { "enum": ["revision", "repository", "host", "service", "deployment"] },
+        "appliesTo": {
+          "enum": [
+            "every-revision",
+            "default-branch",
+            "deployed-revision",
+            "release",
+            "repository",
+            "host",
+            "service",
+            "deployment"
+          ]
+        },
         "freshness": { "$ref": "#/$defs/freshness" },
         "acceptedSources": {
           "type": "array",
