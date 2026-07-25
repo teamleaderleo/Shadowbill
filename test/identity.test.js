@@ -62,6 +62,19 @@ test("existing Shadowbill storage remains active without silent movement", async
   assert.match(identity.warnings[0], /existing Shadowbill ledger/);
 });
 
+test("legacy custom data configuration retains the legacy default token path", async () => {
+  const identity = await resolveStorageIdentity({
+    home: "/home/tester",
+    environment: { SHADOWBILL_DATA: "/custom/events.jsonl" },
+    pathExists: fakeExists([]),
+  });
+
+  assert.equal(identity.dataPath, "/custom/events.jsonl");
+  assert.equal(identity.dataSource, "SHADOWBILL_DATA");
+  assert.equal(identity.tokenPath, "/home/tester/.shadowbill/collector-token");
+  assert.equal(identity.compatibilityMode, true);
+});
+
 test("implicit dual ledgers fail closed", async () => {
   await assert.rejects(
     resolveStorageIdentity({
