@@ -19,8 +19,13 @@ test("reads and emits a bounded observation file", async () => {
   await temporaryDirectory(async (directory) => {
     const fixture = new URL("./fixtures/observations/renderprove-browser-review-passed-v1.json", import.meta.url);
     const text = await readBoundedObservationFile(fixture);
-    const result = await emitObservation({ store: new JsonlEventStore(join(directory, "events.jsonl")), text });
+    const result = await emitObservation({
+      store: new JsonlEventStore(join(directory, "events.jsonl")),
+      text,
+      now: new Date("2026-07-26T12:00:00.000Z"),
+    });
     assert.equal(result.status, "inserted");
+    assert.equal(result.observation.data.ingestedAt, "2026-07-26T12:00:00.000Z");
   });
 });
 

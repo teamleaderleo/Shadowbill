@@ -34,7 +34,7 @@ Legacy SHADOWBILL_* variables and the shadowbill binary remain compatibility ali
 }
 
 function parseEmitArguments(args) {
-  const result = { file: undefined, stdin: false, dataPath: undefined, output: "human" };
+  const result = { file: undefined, stdin: false, dataPath: undefined, output: "human", outputSet: false };
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value === "--stdin") {
@@ -53,8 +53,10 @@ function parseEmitArguments(args) {
         if (result.dataPath !== undefined) throw new EmitUsageError("--data may be supplied once.");
         result.dataPath = next;
       } else {
+        if (result.outputSet) throw new EmitUsageError("--output may be supplied once.");
         if (next !== "human" && next !== "json") throw new EmitUsageError("--output must be human or json.");
         result.output = next;
+        result.outputSet = true;
       }
       continue;
     }
@@ -71,8 +73,7 @@ function parseEmitArguments(args) {
 }
 
 function requestedOutput(args) {
-  const index = args.indexOf("--output");
-  return index >= 0 && args[index + 1] === "json" ? "json" : "human";
+  return args.some((value, index) => value === "--output" && args[index + 1] === "json") ? "json" : "human";
 }
 
 function uniqueWarnings(warnings) {

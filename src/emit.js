@@ -1,5 +1,5 @@
 import { open } from "node:fs/promises";
-import { OBSERVATION_MAX_BYTES, ObservationError, parseObservationJson } from "./observation.js";
+import { OBSERVATION_MAX_BYTES, ObservationError, parseObservationJson, validateObservation } from "./observation.js";
 import { ObservationLedger } from "./observation-ledger.js";
 
 export class ObservationSourceError extends Error {
@@ -77,7 +77,9 @@ export async function readBoundedObservationStream(stream) {
   return decodeUtf8(Buffer.concat(chunks, size));
 }
 
-export async function emitObservation({ store, text }) {
+export async function emitObservation({ store, text, now = new Date() }) {
   const observation = parseObservationJson(text);
+  observation.data = { ...observation.data, ingestedAt: now.toISOString() };
+  validateObservation(observation);
   return new ObservationLedger(store).append(observation);
 }

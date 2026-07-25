@@ -46,6 +46,8 @@ test("emits a file with machine-readable output", async () => {
     assert.equal(response.status, "inserted");
     assert.equal(response.identity.source, "urn:proofwake:adapter:renderprove");
     assert.match(response.fingerprint, /^sha256:[a-f0-9]{64}$/);
+    const submitted = JSON.parse(await readFile(fixturePath, "utf8"));
+    assert.notEqual(response.ingestedAt, submitted.data.ingestedAt);
   });
 });
 
@@ -107,6 +109,8 @@ test("requires exactly one input source and documents emit", async () => {
   assert.equal(JSON.parse(missing.stdout).error.code, "PROOFWAKE_EMIT_USAGE");
   const both = await run(["emit", "--json", fixturePath, "--stdin", "--output", "json"]);
   assert.equal(JSON.parse(both.stdout).error.code, "PROOFWAKE_EMIT_USAGE");
+  const repeatedOutput = await run(["emit", "--json", fixturePath, "--output", "human", "--output", "json"]);
+  assert.equal(JSON.parse(repeatedOutput.stdout).error.code, "PROOFWAKE_EMIT_USAGE");
   const helpResult = await run(["--help"]);
   assert.equal(helpResult.code, 0);
   assert.match(helpResult.stdout, /emit --json FILE/);
