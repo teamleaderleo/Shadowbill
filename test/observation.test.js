@@ -14,6 +14,14 @@ async function fixture() {
   return readFile(fixtureUrl, "utf8");
 }
 
+function reverseKeys(value) {
+  if (Array.isArray(value)) return value.map(reverseKeys);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).reverse().map(([key, nested]) => [key, reverseKeys(nested)]));
+  }
+  return value;
+}
+
 test("strict JSON rejects duplicate keys at nested levels", () => {
   assert.throws(
     () => parseStrictJson('{"data":{"status":"passed","status":"failed"}}'),
@@ -38,10 +46,25 @@ test("observation normalization is bounded, explicit, and deterministic", async 
   assert.equal(prepared.event.proofwakeingestedat, "2026-07-25T17:01:00.000Z");
   assert.match(prepared.fingerprint, /^[0-9a-f]{64}$/);
 
-  const reordered = JSON.stringify(JSON.parse(source), Object.keys(JSON.parse(source)).reverse());
-  assert.notEqual(reordered, source);
-  const normalized = normalizeObservation(JSON.parse(source));
-  assert.equal(prepared.fingerprint, prepareObservation(canonicalJson(normalized)).fingerprint);
+  const parsed = JSON.parse(source);
+  const reordered = JSON.stringify(reverseKeys(parsed));
+  assert.notEqual(reordered, JSON.stringify(parsed));
+  assert.equal(prepared.fingerprint, prepareObservation(reordered).fingerprint);
+  assert.equal(prepared.fingerprint, prepareObservation(canonicalJson(normalizeObservation(parsed))).fingerprint);
+});
+
+test("source and type identity stay source-defined while timestamps are strict", async () => {
+  const valid = JSON.parse(await fixture());
+  valid.source = "urn:Example:Case-Sensitive-Source";
+  valid.type = "Dev.Proofwake.Verify.Finished.V1";
+  const normalized = normalizeObservation(valid);
+  assert.equal(normalized.source, valid.source);
+  assert.equal(normalized.type, valid.type);
+
+  assert.throws(
+    () => normalizeObservation({ ...valid, time: "2026-07-25" }),
+    (error) => error?.code === "PW_SCHEMA_INVALID" && /RFC 3339/.test(error.message),
+  );
 });
 
 test("unknown envelope, data, and attribute fields fail closed", async () => {
@@ -63,20 +86,30 @@ test("unknown envelope, data, and attribute fields fail closed", async () => {
   );
 });
 
-test("local repository identity uses a privacy-preserving digest", async () => {
+test("repository identity variants reject contradictory fields", async () => {
   const valid = JSON.parse(await fixture());
+  const localId = `sha256:${"a".repeat(64)}`;
   const local = normalizeObservation({
     ...valid,
     data: {
       ...valid.data,
-      repository: {
-        kind: "local",
-        localId: `sha256:${"a".repeat(64)}`,
-      },
+      repository: { kind: "local", localId },
     },
   });
-  assert.deepEqual(local.data.repository, {
-    kind: "local",
-    localId: `sha256:${"a".repeat(64)}`,
-  });
+  assert.deepEqual(local.data.repository, { kind: "local", localId });
+
+  assert.throws(
+    () => normalizeObservation({
+      ...valid,
+      data: { ...valid.data, repository: { ...valid.data.repository, localId } },
+    }),
+    (error) => error?.code === "PW_SCHEMA_INVALID" && /must not include localId/.test(error.message),
+  );
+  assert.throws(
+    () => normalizeObservation({
+      ...valid,
+      data: { ...valid.data, repository: { kind: "local", localId, id: "team/repo" } },
+    }),
+    (error) => error?.code === "PW_SCHEMA_INVALID" && /remote repository fields/.test(error.message),
+  );
 });
