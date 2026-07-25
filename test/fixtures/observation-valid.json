@@ -1,0 +1,40 @@
+{
+  "specversion": "1.0",
+  "id": "local-verify-1",
+  "source": "urn:proofwake:adapter:local-cli",
+  "type": "dev.proofwake.verify.finished.v1",
+  "time": "2026-07-25T17:00:00Z",
+  "subject": "repo:team/repo@sha:0123456789012345678901234567890123456789",
+  "datacontenttype": "application/json",
+  "dataschema": "urn:proofwake:schema:observation:1",
+  "data": {
+    "schemaVersion": 1,
+    "adapter": {
+      "name": "local-cli",
+      "version": "0.3.0",
+      "trust": "local-operator"
+    },
+    "repository": {
+      "kind": "remote",
+      "id": "team/repo",
+      "url": "https://github.com/team/repo",
+      "provider": "github"
+    },
+    "revision": {
+      "algorithm": "git-sha1",
+      "id": "0123456789012345678901234567890123456789"
+    },
+    "kind": "verify",
+    "status": "passed",
+    "observedAt": "2026-07-25T17:00:01Z",
+    "durationMs": 1250,
+    "attempt": 1,
+    "evidence": [],
+    "attributes": {
+      "vcs.provider.name": "github",
+      "vcs.ref.head.revision": "0123456789012345678901234567890123456789"
+    },
+    "redacted": false,
+    "truncated": false
+  }
+}
