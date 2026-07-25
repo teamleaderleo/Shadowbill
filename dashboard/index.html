@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Shadowbill — Local Cost Dashboard</title>
+  <title>Proofwake — Shadowbill Estimates</title>
   <link rel="stylesheet" href="/dashboard/dashboard.css">
   <script src="/dashboard/dashboard.js" defer></script>
 </head>
 <body>
   <header class="site-header">
     <div>
-      <p class="eyebrow">Local AI compute ledger</p>
-      <h1>Shadowbill</h1>
+      <p class="eyebrow">Optional Shadowbill estimate module</p>
+      <h1>Proofwake</h1>
       <p id="range-caption" class="subtitle">Loading rolling report…</p>
     </div>
     <div class="status-wrap">
@@ -94,7 +94,7 @@
       </div>
       <div id="chart-empty" class="empty-state" hidden>No activity in this range.</div>
       <svg id="daily-chart" class="daily-chart" viewBox="0 0 1200 360" role="img" aria-labelledby="chart-title chart-description">
-        <title id="chart-title">Daily Shadowbill usage</title>
+        <title id="chart-title">Daily Shadowbill estimate activity</title>
         <desc id="chart-description">Bars show daily working cost. The line shows chat-turn volume.</desc>
       </svg>
     </section>
