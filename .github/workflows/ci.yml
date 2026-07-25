@@ -11,27 +11,6 @@ concurrency:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: pilot-fingerprints
-            pattern: five pilot
-          - name: identity
-            pattern: remote and local
-          - name: source-resolution
-            pattern: signal kinds
-          - name: receipt-paths
-            pattern: receipt adapters
-          - name: lifecycle-freshness
-            pattern: lifecycle and freshness
-          - name: schema-contract
-            pattern: published schema
-          - name: unknown-version
-            pattern: unknown fields
-          - name: applicability
-            pattern: pilot policies declare applicability
-    name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,4 +18,4 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: node --test --test-name-pattern="${{ matrix.pattern }}" test/repository-policy*.test.js
+      - run: npm test
