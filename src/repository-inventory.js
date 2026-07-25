@@ -22,10 +22,6 @@ function acceptedSource(observation, sources) {
     : adapter === source);
 }
 
-function appliesToRevision(signal) {
-  return signal.subject === "revision" && ["every-revision", "default-branch"].includes(signal.appliesTo);
-}
-
 function signalState(signal, observations, context, now) {
   let candidates = observations.filter((observation) =>
     observation.data?.kind === signal.kind && acceptedSource(observation, signal.acceptedSources));
@@ -137,6 +133,14 @@ function attentionReason(health, signals, problems) {
   return null;
 }
 
+function problemFrom(error, fallbackCode = "REPOSITORY_INSPECTION_FAILED") {
+  return {
+    code: typeof error?.code === "string" ? error.code : fallbackCode,
+    message: error instanceof Error ? error.message : String(error),
+    ...(typeof error?.path === "string" ? { path: error.path } : {}),
+  };
+}
+
 async function inspectEntry(entry, now) {
   const problems = [];
   let rootMetadata;
@@ -161,7 +165,13 @@ async function inspectEntry(entry, now) {
     problems.push({ code: "REPOSITORY_ROOT_REPLACED", message: "Enrolled repository root identity changed." });
   }
 
-  const committed = await readRepositoryPolicyFile(join(entry.root, ".proofwake.json"));
+  let committed = null;
+  try {
+    committed = await readRepositoryPolicyFile(join(entry.root, ".proofwake.json"));
+  } catch (error) {
+    problems.push(problemFrom(error, "REPOSITORY_POLICY_INVALID"));
+  }
+
   let effectivePolicy = entry.policy;
   let effectiveSource = entry.configuration.source;
   let policyChanged = false;
@@ -169,7 +179,9 @@ async function inspectEntry(entry, now) {
 
   if (entry.configuration.source === "committed") {
     if (!committed) {
-      problems.push({ code: "REPOSITORY_POLICY_MISSING", message: "Committed policy is missing." });
+      if (!problems.some((problem) => problem.code.startsWith("REPOSITORY_POLICY_"))) {
+        problems.push({ code: "REPOSITORY_POLICY_MISSING", message: "Committed policy is missing." });
+      }
     } else {
       effectivePolicy = committed;
       policyChanged = repositoryPolicyFingerprint(committed) !== entry.configuration.fingerprint;
@@ -194,11 +206,7 @@ async function inspectEntry(entry, now) {
       lifecycle: effectivePolicy.lifecycle.state,
     });
   } catch (error) {
-    problems.push({
-      code: typeof error?.code === "string" ? error.code : "REPOSITORY_INSPECTION_FAILED",
-      message: error instanceof Error ? error.message : String(error),
-      ...(typeof error?.path === "string" ? { path: error.path } : {}),
-    });
+    problems.push(problemFrom(error));
   }
 
   return {
