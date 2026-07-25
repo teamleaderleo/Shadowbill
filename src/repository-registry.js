@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseStrictJson } from "./strict-json.js";
@@ -125,6 +125,55 @@ function normalizeRegistry(value) {
   return { version: REGISTRY_VERSION, entries };
 }
 
+function changed(before, after) {
+  return before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs;
+}
+
+function decodeUtf8(bytes) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("REPOSITORY_REGISTRY_INVALID_UTF8", "Repository registry must be valid UTF-8.");
+  }
+}
+
+async function readRegistryFile(path) {
+  let pathMetadata;
+  try {
+    pathMetadata = await lstat(path);
+  } catch (error) {
+    if (isCode(error, "ENOENT")) return null;
+    fail("REPOSITORY_REGISTRY_UNAVAILABLE", "Repository registry could not be inspected.");
+  }
+  if (pathMetadata.isSymbolicLink()) fail("REPOSITORY_REGISTRY_SYMLINK", "Repository registry must not be a symbolic link.");
+  if (!pathMetadata.isFile()) fail("REPOSITORY_REGISTRY_NOT_FILE", "Repository registry must be a regular file.");
+
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if (isCode(error, "ELOOP")) fail("REPOSITORY_REGISTRY_SYMLINK", "Repository registry must not be a symbolic link.");
+    fail("REPOSITORY_REGISTRY_UNAVAILABLE", "Repository registry could not be opened.");
+  }
+
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) fail("REPOSITORY_REGISTRY_NOT_FILE", "Repository registry must be a regular file.");
+    if (before.dev !== pathMetadata.dev || before.ino !== pathMetadata.ino) {
+      fail("REPOSITORY_REGISTRY_CHANGED", "Repository registry changed before it could be read.");
+    }
+    if (before.size > REGISTRY_MAX_BYTES) fail("REPOSITORY_REGISTRY_TOO_LARGE", `Registry exceeds ${REGISTRY_MAX_BYTES} bytes.`);
+    const bytes = await handle.readFile();
+    if (bytes.length > REGISTRY_MAX_BYTES) fail("REPOSITORY_REGISTRY_TOO_LARGE", `Registry exceeds ${REGISTRY_MAX_BYTES} bytes.`);
+    const after = await handle.stat();
+    if (changed(before, after)) fail("REPOSITORY_REGISTRY_CHANGED", "Repository registry changed while it was being read.");
+    return decodeUtf8(bytes);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function syncDirectory(path) {
   const handle = await open(path, constants.O_RDONLY);
   try {
@@ -145,14 +194,8 @@ export class RepositoryRegistryStore {
   }
 
   async read() {
-    let raw;
-    try {
-      raw = await readFile(this.path, "utf8");
-    } catch (error) {
-      if (isCode(error, "ENOENT")) return { version: REGISTRY_VERSION, entries: [] };
-      throw error;
-    }
-    if (Buffer.byteLength(raw, "utf8") > REGISTRY_MAX_BYTES) fail("REPOSITORY_REGISTRY_TOO_LARGE", `Registry exceeds ${REGISTRY_MAX_BYTES} bytes.`);
+    const raw = await readRegistryFile(this.path);
+    if (raw === null) return { version: REGISTRY_VERSION, entries: [] };
     return normalizeRegistry(parseStrictJson(raw, {
       maxBytes: REGISTRY_MAX_BYTES,
       maxDepth: 20,
