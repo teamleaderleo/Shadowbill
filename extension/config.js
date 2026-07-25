@@ -1,4 +1,4 @@
-(function attachShadowbillConfig(root) {
+(function attachProofwakeConfig(root) {
   const DEFAULTS = Object.freeze({
     enabled: true,
     collectorUrl: "http://127.0.0.1:7337",
@@ -50,11 +50,14 @@
     return model;
   }
 
-  root.ShadowbillConfig = Object.freeze({
+  const config = Object.freeze({
     DEFAULTS,
     collectorPermissionPattern,
     normalizeCollectorToken,
     normalizeCollectorUrl,
     normalizeModel,
   });
+
+  root.ProofwakeConfig = config;
+  root.ShadowbillConfig = config;
 })(globalThis);
