@@ -24,6 +24,7 @@ const SIGNAL_KINDS = new Set([
   "shadowbill-estimate",
 ]);
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const REVISION = /^[a-f0-9]{40}$/u;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const COMMAND_MAX_ARGUMENTS = 256;
@@ -157,22 +158,44 @@ async function inspectCheckout(cwd, repository) {
   return {
     repository: normalizedRepository,
     workingDirectory,
+    root,
     revision,
     branch: branch || null,
-    dirty: dirty.length > 0,
+    dirtyBefore: dirty.length > 0,
     detached: branch.length === 0,
     binding: remoteRepositories.length > 0 ? "remote-verified" : "operator-declared",
   };
 }
 
-function classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, dirty }) {
+async function inspectPostRun(checkout) {
+  let revisionAfter = null;
+  let dirtyAfter = null;
+  let unavailable = false;
+  try {
+    revisionAfter = await git(checkout.root, ["rev-parse", "--verify", "HEAD"]);
+  } catch {
+    unavailable = true;
+  }
+  try {
+    dirtyAfter = (await git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=normal"])).length > 0;
+  } catch {
+    unavailable = true;
+  }
+  return {
+    revisionAfter: REVISION.test(revisionAfter ?? "") ? revisionAfter : null,
+    dirtyAfter,
+    unavailable,
+  };
+}
+
+function classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, hasCaveat }) {
   if (spawnError) return { failureCode: "spawn-failed", status: "unavailable", cliExitCode: 127 };
   if (timedOut) return { failureCode: "timeout", status: "failed", cliExitCode: 124 };
   if (outputLimited) return { failureCode: "output-limit", status: "failed", cliExitCode: 125 };
   if (cancellationSignal) return { failureCode: "cancelled", status: "cancelled", cliExitCode: signalExitCode(cancellationSignal) };
   if (closeResult.signal) return { failureCode: "signalled", status: "failed", cliExitCode: signalExitCode(closeResult.signal) };
   if (closeResult.code !== 0) return { failureCode: "exit-nonzero", status: "failed", cliExitCode: closeResult.code ?? 1 };
-  if (dirty) return { failureCode: null, status: "warning", cliExitCode: 0 };
+  if (hasCaveat) return { failureCode: null, status: "warning", cliExitCode: 0 };
   return { failureCode: null, status: "passed", cliExitCode: 0 };
 }
 
@@ -181,7 +204,7 @@ function factsMap(observation) {
 }
 
 function commandFacts(result) {
-  const outcome = result.failureCode ?? (result.dirty ? "passed-dirty" : "passed");
+  const outcome = result.failureCode ?? (result.hasCaveat ? "passed-with-caveat" : "passed");
   const facts = [
     { name: "proofwake.command.outcome", value: outcome },
     { name: "proofwake.command.executable-sha256", value: result.executableDigest },
@@ -204,9 +227,14 @@ function commandFacts(result) {
     { name: "proofwake.command.stdout-retained", value: false },
     { name: "proofwake.command.stderr-retained", value: false },
     { name: "proofwake.command.dirty-worktree", value: result.dirty },
+    { name: "proofwake.command.dirty-worktree-before", value: result.dirtyBefore },
+    { name: "proofwake.command.dirty-worktree-after", value: result.dirtyAfter ?? false },
+    { name: "proofwake.command.revision-changed", value: result.revisionChanged },
+    { name: "proofwake.command.post-inspection-unavailable", value: result.postInspectionUnavailable },
     { name: "proofwake.command.detached-head", value: result.detached },
     { name: "proofwake.command.repository-binding", value: result.binding },
   ];
+  if (result.revisionAfter !== null) facts.push({ name: "proofwake.command.finished-revision", value: result.revisionAfter });
   if (result.exitCode !== null) facts.push({ name: "proofwake.command.exit-code", value: result.exitCode });
   if (result.signal !== null) facts.push({ name: "proofwake.command.signal", value: result.signal });
   if (SAFE_TOKEN.test(result.executable)) facts.push({ name: "proofwake.command.executable", value: result.executable });
@@ -224,7 +252,7 @@ function existingResult(record) {
   const observation = record.observation;
   const facts = factsMap(observation);
   const outcome = facts.get("proofwake.command.outcome") ?? "unknown";
-  const failureCode = outcome === "passed" || outcome === "passed-dirty" ? null : outcome;
+  const failureCode = outcome === "passed" || outcome === "passed-with-caveat" ? null : outcome;
   const signal = facts.get("proofwake.command.signal") ?? null;
   const exitCode = facts.has("proofwake.command.exit-code") ? facts.get("proofwake.command.exit-code") : null;
   let cliExitCode = 0;
@@ -260,6 +288,12 @@ function existingResult(record) {
     cancelled: facts.get("proofwake.command.cancelled") ?? false,
     outputLimited: facts.get("proofwake.command.output-limited") ?? false,
     dirty: facts.get("proofwake.command.dirty-worktree") ?? false,
+    dirtyBefore: facts.get("proofwake.command.dirty-worktree-before") ?? false,
+    dirtyAfter: facts.get("proofwake.command.dirty-worktree-after") ?? false,
+    revisionAfter: facts.get("proofwake.command.finished-revision") ?? null,
+    revisionChanged: facts.get("proofwake.command.revision-changed") ?? false,
+    postInspectionUnavailable: facts.get("proofwake.command.post-inspection-unavailable") ?? false,
+    hasCaveat: observation.data.status === "warning",
     detached: facts.get("proofwake.command.detached-head") ?? false,
     binding: facts.get("proofwake.command.repository-binding") ?? "unknown",
     observation,
@@ -287,8 +321,11 @@ async function findReplay(store, runId, expected) {
     facts.get("proofwake.command.working-directory-sha256") === expected.workingDirectoryDigest &&
     facts.get("proofwake.command.timeout-ms") === expected.timeoutMs;
   if (!matches) fail("PROOFWAKE_RUN_ID_CONFLICT", "Run ID already belongs to a different command receipt.", "$.runId");
-  if (expected.dirty || facts.get("proofwake.command.dirty-worktree") === true) {
-    fail("PROOFWAKE_RUN_REPLAY_DIRTY", "Run IDs cannot replay evidence from a dirty worktree.", "$.runId");
+  if (expected.dirtyBefore ||
+      facts.get("proofwake.command.dirty-worktree") === true ||
+      facts.get("proofwake.command.revision-changed") === true ||
+      facts.get("proofwake.command.post-inspection-unavailable") === true) {
+    fail("PROOFWAKE_RUN_REPLAY_UNSTABLE", "Run IDs cannot replay evidence from an unstable checkout state.", "$.runId");
   }
   return existingResult(record);
 }
@@ -336,7 +373,7 @@ export async function executeLocalCommand({
     argvDigest,
     workingDirectoryDigest,
     timeoutMs,
-    dirty: checkout.dirty,
+    dirtyBefore: checkout.dirtyBefore,
   });
   if (replay) return replay;
 
@@ -418,10 +455,15 @@ export async function executeLocalCommand({
     process.removeListener("SIGTERM", onSigterm);
   }
 
+  const postRun = await inspectPostRun(checkout);
+  const dirtyAfter = postRun.dirtyAfter;
+  const dirty = checkout.dirtyBefore || dirtyAfter === true;
+  const revisionChanged = postRun.revisionAfter !== null && postRun.revisionAfter !== checkout.revision;
+  const hasCaveat = dirty || revisionChanged || postRun.unavailable;
   const durationMs = Number((process.hrtime.bigint() - startedMonotonic) / 1_000_000n);
   const finished = noEarlierThan(timestamp(now()), started);
   const ingested = noEarlierThan(timestamp(now()), finished);
-  const outcome = classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, dirty: checkout.dirty });
+  const outcome = classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, hasCaveat });
   const result = {
     runId,
     repository: checkout.repository,
@@ -444,7 +486,13 @@ export async function executeLocalCommand({
     timedOut,
     cancelled: Boolean(cancellationSignal),
     outputLimited,
-    dirty: checkout.dirty,
+    dirty,
+    dirtyBefore: checkout.dirtyBefore,
+    dirtyAfter,
+    revisionAfter: postRun.revisionAfter,
+    revisionChanged,
+    postInspectionUnavailable: postRun.unavailable,
+    hasCaveat,
     detached: checkout.detached,
     binding: checkout.binding,
   };
