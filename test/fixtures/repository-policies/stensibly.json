@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "repository": {
+    "kind": "remote",
+    "id": "teamleaderleo/stensibly",
+    "provider": "github"
+  },
+  "lifecycle": {
+    "state": "active",
+    "dormantAfterDays": 30
+  },
+  "signals": [
+    {
+      "kind": "verify",
+      "requirement": "required",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "deployment",
+      "requirement": "required",
+      "subject": "deployment",
+      "freshness": { "mode": "duration", "hours": 24 },
+      "acceptedSources": ["github"]
+    },
+    {
+      "kind": "service-check",
+      "requirement": "required",
+      "subject": "service",
+      "freshness": { "mode": "duration", "hours": 1 },
+      "acceptedSources": ["adapter:stensibly-verifier"]
+    },
+    {
+      "kind": "browser-review",
+      "requirement": "optional",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["adapter:renderprove"]
+    },
+    {
+      "kind": "github-ci",
+      "requirement": "optional",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["github"]
+    }
+  ],
+  "adapters": [
+    {
+      "name": "stensibly-verifier",
+      "type": "receipt-file",
+      "path": ".proofwake/receipts/stensibly-service.json",
+      "schema": "stensibly.verification.v1",
+      "trust": "verified-receipt"
+    },
+    {
+      "name": "renderprove",
+      "type": "receipt-file",
+      "path": ".renderprove/receipt.json",
+      "schema": "renderprove.receipt.v1",
+      "trust": "verified-receipt"
+    }
+  ]
+}
