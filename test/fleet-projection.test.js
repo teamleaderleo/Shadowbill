@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import { buildFleetProjection } from "../src/fleet-projection.js";
 import { inspectRepositoryEnrollment } from "../src/repository-enrollment.js";
 import { ObservationLedger } from "../src/observation-ledger.js";
 import { RepositoryRegistryStore } from "../src/repository-registry.js";
-import { buildFleetProjection } from "../src/revision-projection.js";
 import { JsonlEventStore } from "../src/store.js";
 
 const exec = promisify(execFile);
