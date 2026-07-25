@@ -19,14 +19,26 @@ jobs:
           node-version: 22
           cache: npm
       - name: Run tests
+        id: tests
         shell: bash
         run: |
           set +e
           npm test > test-output.log 2>&1
           status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
           if [ "$status" -eq 0 ]; then
             tail -n 30 test-output.log
           else
             tail -n 220 test-output.log
           fi
-          exit "$status"
+      - name: Upload failed test output
+        if: steps.tests.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofwake-test-output
+          path: test-output.log
+          retention-days: 1
+      - name: Propagate test result
+        if: always()
+        shell: bash
+        run: exit "${{ steps.tests.outputs.status }}"
