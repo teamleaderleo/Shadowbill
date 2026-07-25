@@ -2,6 +2,7 @@
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
 import { JsonlEventStore } from "./store.js";
+import { runRepositoryCommand } from "./repository-cli.js";
 
 class EmitUsageError extends Error {
   constructor(message) {
@@ -19,6 +20,8 @@ The evidence trail behind every revision.
 Commands:
   emit --json FILE [--data PATH] [--output human|json]
   emit --stdin [--data PATH] [--output human|json]
+  enroll PATH [--dry-run] [--repository owner/name] [--output human|json]
+  repositories [--output human|json]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
   mcp [--allow-writes]
@@ -150,6 +153,8 @@ if (command === undefined || command === "help" || command === "--help" || comma
   console.log(help());
 } else if (command === "emit") {
   await runEmit(process.argv.slice(3));
+} else if (command === "enroll" || command === "repositories") {
+  await runRepositoryCommand(command, process.argv.slice(3));
 } else {
   await import("./cli.js");
 }

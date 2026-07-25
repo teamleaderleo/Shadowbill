@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/teamleaderleo/proofwake/main/schema/repository-v1.schema.json",
+  "version": 1,
+  "repository": "owner/project",
+  "lifecycle": "active",
+  "expectedSignals": [
+    {
+      "kind": "verify",
+      "required": true,
+      "staleAfterHours": 0,
+      "scope": "revision"
+    },
+    {
+      "kind": "github-ci",
+      "required": false,
+      "staleAfterHours": 72,
+      "scope": "revision"
+    },
+    {
+      "kind": "browser-review",
+      "required": false,
+      "staleAfterHours": 72,
+      "scope": "revision"
+    }
+  ],
+  "adapters": {
+    "renderprove": ".renderprove/receipt.json"
+  }
+}
