@@ -11,7 +11,7 @@ const MAX_STRING = 512;
 const TOP_LEVEL_KEYS = new Set(["version", "repository", "lifecycle", "signals", "adapters"]);
 const REPOSITORY_KEYS = new Set(["kind", "id", "provider", "localId", "displayName"]);
 const LIFECYCLE_KEYS = new Set(["state", "dormantAfterDays"]);
-const SIGNAL_KEYS = new Set(["kind", "requirement", "subject", "freshness", "acceptedSources"]);
+const SIGNAL_KEYS = new Set(["kind", "requirement", "subject", "appliesTo", "freshness", "acceptedSources"]);
 const FRESHNESS_KEYS = new Set(["mode", "hours"]);
 const ADAPTER_KEYS = new Set(["name", "type", "path", "schema", "trust"]);
 
@@ -28,6 +28,23 @@ const SIGNAL_KINDS = new Set([
 ]);
 const REQUIREMENTS = new Set(["required", "optional"]);
 const SUBJECTS = new Set(["revision", "repository", "host", "service", "deployment"]);
+const APPLICABILITY = new Set([
+  "every-revision",
+  "default-branch",
+  "deployed-revision",
+  "release",
+  "repository",
+  "host",
+  "service",
+  "deployment",
+]);
+const APPLICABILITY_BY_SUBJECT = Object.freeze({
+  revision: new Set(["every-revision", "default-branch", "deployed-revision", "release"]),
+  repository: new Set(["repository"]),
+  host: new Set(["host"]),
+  service: new Set(["service"]),
+  deployment: new Set(["deployment"]),
+});
 const FRESHNESS_MODES = new Set(["revision", "duration", "none"]);
 const LIFECYCLE_STATES = new Set(["active", "dormant"]);
 const TRUST_CLASSES = new Set([
@@ -145,10 +162,18 @@ function normalizeFreshness(freshness, path) {
 
 function normalizeSignal(signal, index) {
   const path = `$.signals[${index}]`;
-  exactKeys(signal, SIGNAL_KEYS, ["kind", "requirement", "subject", "freshness", "acceptedSources"], path);
+  exactKeys(signal, SIGNAL_KEYS, ["kind", "requirement", "subject", "appliesTo", "freshness", "acceptedSources"], path);
   const kind = enumValue(signal.kind, SIGNAL_KINDS, `${path}.kind`);
   const requirement = enumValue(signal.requirement, REQUIREMENTS, `${path}.requirement`);
   const subject = enumValue(signal.subject, SUBJECTS, `${path}.subject`);
+  const appliesTo = enumValue(signal.appliesTo, APPLICABILITY, `${path}.appliesTo`);
+  if (!APPLICABILITY_BY_SUBJECT[subject].has(appliesTo)) {
+    fail(
+      "REPOSITORY_POLICY_APPLICABILITY_CONFLICT",
+      `${appliesTo} does not apply to ${subject} observations.`,
+      `${path}.appliesTo`,
+    );
+  }
   const freshness = normalizeFreshness(signal.freshness, `${path}.freshness`);
 
   if (subject === "revision" && freshness.mode !== "revision") {
@@ -173,7 +198,7 @@ function normalizeSignal(signal, index) {
     return normalized;
   });
 
-  return { kind, requirement, subject, freshness, acceptedSources };
+  return { kind, requirement, subject, appliesTo, freshness, acceptedSources };
 }
 
 function validateReceiptPath(value, path) {
