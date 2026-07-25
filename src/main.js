@@ -2,6 +2,7 @@
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
 import { runEnrollCommand, runRepositoriesCommand } from "./repository-cli.js";
+import { runCommandCli } from "./run-cli.js";
 import { JsonlEventStore } from "./store.js";
 
 class EmitUsageError extends Error {
@@ -24,6 +25,9 @@ Commands:
               [--write] [--approve-autodetected] [--replace]
               [--registry PATH] [--data PATH] [--output human|json]
   repositories [--registry PATH] [--data PATH] [--output human|json]
+  run --repo owner/name --kind KIND [--cwd PATH] [--run-id TOKEN]
+      [--timeout-seconds N] [--data PATH] [--output human|json]
+      -- COMMAND [ARGS...]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
   mcp [--allow-writes]
@@ -34,6 +38,7 @@ Commands:
 
 Emit accepts one complete Proofwake observation v1 document. Enrolment is a dry run
 unless --write is supplied. A tracked, clean .proofwake.json is authoritative.
+Run launches one argument vector without a shell and records a bounded terminal receipt.
 
 Legacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`;
 }
@@ -159,6 +164,8 @@ if (command === undefined || command === "help" || command === "--help" || comma
   await runEnrollCommand(process.argv.slice(3));
 } else if (command === "repositories") {
   await runRepositoriesCommand(process.argv.slice(3));
+} else if (command === "run") {
+  await runCommandCli(process.argv.slice(3));
 } else {
   await import("./cli.js");
 }
