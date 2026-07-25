@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "description": "Local-only ChatGPT usage telemetry for Shadowbill.",
   "permissions": ["storage"],
-  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1:7337/*"],
+  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "content_scripts": [
     {
