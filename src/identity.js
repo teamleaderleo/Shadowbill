@@ -134,7 +134,7 @@ export async function resolveStorageIdentity(options = {}) {
   } else if (tokenEnvironment.value !== undefined) {
     tokenPath = resolve(tokenEnvironment.value);
     tokenSource = tokenEnvironment.source;
-  } else if (dataPath === legacyDataPath) {
+  } else if (compatibilityMode) {
     tokenPath = legacyTokenPath;
     tokenSource = "shadowbill-default";
   } else {
