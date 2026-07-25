@@ -1,0 +1,60 @@
+{
+  "specversion": "1.0",
+  "id": "renderprove.fixture-web-app.aaaaaaaaaaaaaaaa",
+  "source": "urn:proofwake:adapter:renderprove",
+  "type": "dev.proofwake.observation.browser-review.v1",
+  "subject": "repo:teamleaderleo/renderprove@sha:1111111111111111111111111111111111111111",
+  "time": "2026-07-25T16:00:03.250Z",
+  "dataschema": "urn:proofwake:schema:observation:v1",
+  "data": {
+    "schemaVersion": 1,
+    "adapter": {
+      "name": "renderprove",
+      "version": "1.0.0",
+      "mappingVersion": 1,
+      "trust": "local-operator",
+      "sourceSchema": "https://raw.githubusercontent.com/teamleaderleo/renderprove/main/schema/receipt-v1.schema.json",
+      "sourceSchemaVersion": "1"
+    },
+    "kind": "browser-review",
+    "status": "passed",
+    "timeSource": "producer",
+    "observedAt": "2026-07-25T16:00:04.000Z",
+    "ingestedAt": "2026-07-25T16:00:05.000Z",
+    "durationMs": 3250,
+    "relationships": {
+      "repository": "teamleaderleo/renderprove",
+      "revision": "1111111111111111111111111111111111111111",
+      "run": "renderprove-fixture-run"
+    },
+    "facts": [
+      { "name": "renderprove.summary.cases", "value": 1 },
+      { "name": "renderprove.summary.failed", "value": 0 },
+      { "name": "renderprove.case.home-desktop.status", "value": "passed" },
+      { "name": "renderprove.case.home-desktop.navigation-ok", "value": true }
+    ],
+    "evidence": [
+      {
+        "uri": "urn:renderprove:receipt:fixture-web-app:aaaaaaaaaaaaaaaa",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 2048,
+        "mediaType": "application/json",
+        "producer": "renderprove",
+        "schema": "renderprove.receipt.v1",
+        "state": "verified",
+        "disclosure": "restricted-reference"
+      }
+    ],
+    "coverage": {
+      "state": "partial",
+      "redacted": true,
+      "truncated": false,
+      "omitted": [
+        "renderprove.redacted.urls",
+        "renderprove.redacted.page-title",
+        "renderprove.redacted.diagnostics",
+        "renderprove.redacted.runtime"
+      ]
+    }
+  }
+}
