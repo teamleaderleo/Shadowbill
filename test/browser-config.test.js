@@ -10,9 +10,10 @@ async function loadConfig() {
   return context.ShadowbillConfig;
 }
 
-test("collector URLs normalize to an origin and exact permission pattern", async () => {
+test("collector URLs normalize to an origin and host permission pattern", async () => {
   const config = await loadConfig();
   assert.equal(config.normalizeCollectorUrl(" http://localhost:7444/path?ignored=1#hash "), "http://localhost:7444");
+  assert.equal(config.collectorPermissionPattern("http://localhost:7444/base"), "http://localhost/*");
   assert.equal(config.collectorPermissionPattern("https://shadowbill.example/base"), "https://shadowbill.example/*");
 });
 
