@@ -3,7 +3,7 @@
 This optional extension feeds aggregate AI-usage estimates into Proofwake's Shadowbill module.
 
 1. Run `npm run serve` from the repository root.
-2. Read the collector-token path printed by `proofwake serve`.
+2. Open the collector-token file path printed by `proofwake serve` and copy its value.
 3. Open `chrome://extensions`.
 4. Enable Developer mode.
 5. Choose **Load unpacked** and select this `extension` directory.
