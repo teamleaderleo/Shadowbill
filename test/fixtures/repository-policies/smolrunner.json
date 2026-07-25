@@ -14,6 +14,7 @@
       "kind": "verify",
       "requirement": "required",
       "subject": "revision",
+      "appliesTo": "every-revision",
       "freshness": { "mode": "revision" },
       "acceptedSources": ["local-command"]
     },
@@ -21,6 +22,7 @@
       "kind": "domain-check",
       "requirement": "required",
       "subject": "revision",
+      "appliesTo": "every-revision",
       "freshness": { "mode": "revision" },
       "acceptedSources": ["local-command"]
     },
@@ -28,6 +30,7 @@
       "kind": "host-diagnostic",
       "requirement": "optional",
       "subject": "host",
+      "appliesTo": "host",
       "freshness": { "mode": "duration", "hours": 24 },
       "acceptedSources": ["adapter:smolrunner"]
     },
@@ -35,6 +38,7 @@
       "kind": "github-ci",
       "requirement": "optional",
       "subject": "revision",
+      "appliesTo": "default-branch",
       "freshness": { "mode": "revision" },
       "acceptedSources": ["github"]
     }
