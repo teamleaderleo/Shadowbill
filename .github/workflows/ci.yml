@@ -15,12 +15,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: policy-core
-            command: node --test test/repository-policy.test.js
-          - name: policy-applicability
-            command: node --test test/repository-policy-applicability.test.js
-          - name: full-suite
-            command: npm test
+          - name: pilot-fingerprints
+            pattern: five pilot
+          - name: identity
+            pattern: remote and local
+          - name: source-resolution
+            pattern: signal kinds
+          - name: receipt-paths
+            pattern: receipt adapters
+          - name: lifecycle-freshness
+            pattern: lifecycle and freshness
+          - name: schema-contract
+            pattern: published schema
+          - name: unknown-version
+            pattern: unknown fields
+          - name: applicability
+            pattern: pilot policies declare applicability
     name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
     steps:
@@ -29,4 +39,4 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: ${{ matrix.command }}
+      - run: node --test --test-name-pattern="${{ matrix.pattern }}" test/repository-policy*.test.js
