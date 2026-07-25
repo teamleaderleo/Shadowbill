@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "overall": "warn",
+  "checks": [
+    {
+      "id": "operating-system",
+      "status": "pass",
+      "summary": "Linux is supported"
+    },
+    {
+      "id": "architecture",
+      "status": "pass",
+      "summary": "x86_64"
+    },
+    {
+      "id": "systemd",
+      "status": "warn",
+      "summary": "systemctl exists, but this fixture is not booted with systemd",
+      "detail": "fixture detail intentionally contains no host path"
+    },
+    {
+      "id": "command-git",
+      "status": "pass",
+      "summary": "git is available",
+      "detail": "executable path removed from fixture"
+    }
+  ]
+}
