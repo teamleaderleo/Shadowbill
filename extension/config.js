@@ -32,7 +32,8 @@
   }
 
   function collectorPermissionPattern(value) {
-    return `${normalizeCollectorUrl(value)}/*`;
+    const url = new URL(normalizeCollectorUrl(value));
+    return `${url.protocol}//${url.hostname}/*`;
   }
 
   function normalizeCollectorToken(value) {
