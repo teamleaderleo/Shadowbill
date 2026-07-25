@@ -180,10 +180,10 @@ Conceptual example:
   "specversion": "1.0",
   "id": "01J...",
   "source": "urn:proofwake:adapter:github",
-  "type": "dev.cdevents.build.finished.0.2.0",
+  "type": "urn:cdevents:build:finished:supported-version",
   "time": "2026-07-25T14:32:27Z",
   "subject": "repo:owner/name@sha:abc123",
-  "dataschema": "https://proofwake.com/schema/observation-v1.json",
+  "dataschema": "urn:proofwake:schema:observation:v1",
   "data": {
     "proofwakeSchemaVersion": 1,
     "adapter": {
