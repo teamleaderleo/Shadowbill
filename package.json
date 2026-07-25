@@ -6,14 +6,15 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "proofwake": "./src/cli.js",
+    "proofwake": "./src/proofwake-cli.js",
     "shadowbill": "./src/cli.js"
   },
   "scripts": {
     "test": "node --test test/*.test.js",
     "serve": "node src/cli.js serve",
     "report": "node src/cli.js report",
-    "mcp": "node src/cli.js mcp"
+    "mcp": "node src/cli.js mcp",
+    "emit": "node src/proofwake-cli.js emit"
   },
   "engines": {
     "node": ">=22"
