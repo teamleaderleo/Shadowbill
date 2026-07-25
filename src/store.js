@@ -162,7 +162,7 @@ export class JsonlEventStore {
       const release = await this.#acquireLock();
       try {
         const ledger = await readLedger(this.path);
-        if (ledger.events.some((existing) => existing.id === event.id)) return false;
+        if (ledger.events.some((existing) => cloudEventIdentity(existing) === null && existing.id === event.id)) return false;
         await this.#repairTrailingPartial(ledger);
         const separator = ledger.trailingPartialStart === null && ledger.needsSeparator ? "\n" : "";
         await syncAppend(this.path, `${separator}${JSON.stringify(event)}\n`);
