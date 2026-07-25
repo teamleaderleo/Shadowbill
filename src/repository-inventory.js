@@ -1,7 +1,8 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { inspectRepositoryEnrollment } from "./repository-enrollment.js";
-import { readRepositoryPolicyFile, repositoryPolicyFingerprint } from "./repository-policy-file.js";
+import { repositoryPolicyFingerprint } from "./repository-policy.js";
+import { readRepositoryPolicyFile } from "./repository-policy-file.js";
 
 function isCode(error, code) {
   return error && typeof error === "object" && "code" in error && error.code === code;
