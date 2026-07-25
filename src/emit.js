@@ -1,4 +1,5 @@
-import { open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { OBSERVATION_MAX_BYTES, ObservationError, parseObservationJson, validateObservation } from "./observation.js";
 import { ObservationLedger } from "./observation-ledger.js";
 
@@ -36,21 +37,54 @@ function sourceChanged(before, after) {
     before.ctimeMs !== after.ctimeMs;
 }
 
+function sourceUnavailable() {
+  return new ObservationSourceError(
+    "OBSERVATION_SOURCE_UNAVAILABLE",
+    "Observation file could not be opened.",
+  );
+}
+
+function sourceNotFile() {
+  return new ObservationSourceError(
+    "OBSERVATION_SOURCE_NOT_FILE",
+    "Observation input must be a regular file.",
+  );
+}
+
 export async function readBoundedObservationFile(path) {
+  let pathMetadata;
+  try {
+    pathMetadata = await lstat(path);
+  } catch {
+    throw sourceUnavailable();
+  }
+  if (pathMetadata.isSymbolicLink()) {
+    throw new ObservationSourceError(
+      "OBSERVATION_SOURCE_SYMLINK",
+      "Observation input must not be a symbolic link.",
+    );
+  }
+  if (!pathMetadata.isFile()) throw sourceNotFile();
+
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
   let handle;
   try {
-    handle = await open(path, "r");
+    handle = await open(path, flags);
   } catch (error) {
-    throw new ObservationSourceError(
-      "OBSERVATION_SOURCE_UNAVAILABLE",
-      `Observation file could not be opened: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (error?.code === "ELOOP") {
+      throw new ObservationSourceError(
+        "OBSERVATION_SOURCE_SYMLINK",
+        "Observation input must not be a symbolic link.",
+      );
+    }
+    throw sourceUnavailable();
   }
 
   try {
     const before = await handle.stat();
-    if (!before.isFile()) {
-      throw new ObservationSourceError("OBSERVATION_SOURCE_NOT_FILE", "Observation input must be a regular file.");
+    if (!before.isFile()) throw sourceNotFile();
+    if (before.dev !== pathMetadata.dev || before.ino !== pathMetadata.ino) {
+      throw new ObservationSourceError("OBSERVATION_SOURCE_CHANGED", "Observation file changed before it could be read.");
     }
     assertBoundedSize(before.size);
     const bytes = await handle.readFile();
