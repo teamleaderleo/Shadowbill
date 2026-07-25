@@ -6,6 +6,16 @@ const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_LOCK_MS = 300_000;
 const DEFAULT_RETRY_DELAY_MS = 15;
 
+export class IdempotencyConflictError extends Error {
+  constructor(source, id) {
+    super(`Observation identity ${source} + ${id} was already used with different semantics`);
+    this.name = "IdempotencyConflictError";
+    this.code = "PW_IDEMPOTENCY_CONFLICT";
+    this.source = source;
+    this.id = id;
+  }
+}
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -68,6 +78,11 @@ async function syncAppend(path, content) {
   } finally {
     await handle.close();
   }
+}
+
+function cloudEventIdentity(event) {
+  if (!event || event.specversion !== "1.0" || typeof event.source !== "string" || typeof event.id !== "string") return null;
+  return `${event.source}\0${event.id}`;
 }
 
 export class JsonlEventStore {
@@ -138,7 +153,7 @@ export class JsonlEventStore {
   }
 
   /**
-   * Appends an event once. Returns false when its ID already exists.
+   * Appends one legacy event by its historical top-level ID semantics.
    * @param {import('./types.js').ShadowbillEvent} event
    * @returns {Promise<boolean>}
    */
@@ -152,6 +167,41 @@ export class JsonlEventStore {
         const separator = ledger.trailingPartialStart === null && ledger.needsSeparator ? "\n" : "";
         await syncAppend(this.path, `${separator}${JSON.stringify(event)}\n`);
         return true;
+      } finally {
+        await release();
+      }
+    });
+
+    this.#writeQueue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  /**
+   * Appends a prepared Proofwake CloudEvent using CloudEvents source + id identity.
+   * Exact replays return the original stored event; conflicting semantic reuse fails.
+   * @param {Record<string, unknown>} event
+   * @returns {Promise<{inserted: boolean, duplicate: boolean, event: Record<string, unknown>}>}
+   */
+  appendObservation(event) {
+    const operation = this.#writeQueue.then(async () => {
+      const release = await this.#acquireLock();
+      try {
+        const ledger = await readLedger(this.path);
+        await this.#repairTrailingPartial(ledger);
+        const identity = cloudEventIdentity(event);
+        if (identity === null || typeof event.proofwakefingerprint !== "string") {
+          throw new Error("appendObservation requires a prepared Proofwake CloudEvent");
+        }
+        const existing = ledger.events.find((candidate) => cloudEventIdentity(candidate) === identity);
+        if (existing) {
+          if (existing.proofwakefingerprint === event.proofwakefingerprint) {
+            return { inserted: false, duplicate: true, event: existing };
+          }
+          throw new IdempotencyConflictError(event.source, event.id);
+        }
+        const separator = ledger.trailingPartialStart === null && ledger.needsSeparator ? "\n" : "";
+        await syncAppend(this.path, `${separator}${JSON.stringify(event)}\n`);
+        return { inserted: true, duplicate: false, event };
       } finally {
         await release();
       }
