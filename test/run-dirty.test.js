@@ -11,7 +11,8 @@ import { JsonlEventStore } from "../src/store.js";
 const exec = promisify(execFile);
 
 async function git(root, ...args) {
-  await exec("git", ["-C", root, ...args], { encoding: "utf8" });
+  const { stdout } = await exec("git", ["-C", root, ...args], { encoding: "utf8" });
+  return stdout.trim();
 }
 
 async function repository(root) {
@@ -38,6 +39,10 @@ async function quiet(callback) {
   }
 }
 
+function factMap(observation) {
+  return new Map(observation.data.facts.map((entry) => [entry.name, entry.value]));
+}
+
 test("passing dirty worktree evidence is warning and cannot replay", async () => {
   const directory = await mkdtemp(join(tmpdir(), "proofwake-run-dirty-"));
   try {
@@ -58,7 +63,7 @@ test("passing dirty worktree evidence is warning and cannot replay", async () =>
       store,
     }));
     assert.equal(first.cliExitCode, 0);
-    assert.equal(first.dirty, true);
+    assert.equal(first.dirtyBefore, true);
     assert.equal(first.observation.data.status, "warning");
 
     await assert.rejects(
@@ -71,9 +76,80 @@ test("passing dirty worktree evidence is warning and cannot replay", async () =>
         outputMode: "json",
         store,
       })),
-      (error) => error.code === "PROOFWAKE_RUN_REPLAY_DIRTY",
+      (error) => error.code === "PROOFWAKE_RUN_REPLAY_UNSTABLE",
     );
     assert.equal(await readFile(marker, "utf8"), "x");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a command that dirties the checkout produces warning evidence", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proofwake-run-dirty-after-"));
+  try {
+    const root = join(directory, "repo");
+    await repository(root);
+    const generated = join(root, "generated.txt");
+    const result = await quiet(() => executeLocalCommand({
+      repository: "example/project",
+      kind: "verify",
+      command: [process.execPath, "-e", `require("node:fs").writeFileSync(${JSON.stringify(generated)}, "generated")`],
+      cwd: root,
+      outputMode: "json",
+      store: new JsonlEventStore(join(directory, "events.jsonl")),
+    }));
+    assert.equal(result.dirtyBefore, false);
+    assert.equal(result.dirtyAfter, true);
+    assert.equal(result.observation.data.status, "warning");
+    const facts = factMap(result.observation);
+    assert.equal(facts.get("proofwake.command.dirty-worktree-before"), false);
+    assert.equal(facts.get("proofwake.command.dirty-worktree-after"), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a command that changes HEAD remains bound to the starting revision and warns", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proofwake-run-revision-change-"));
+  try {
+    const root = join(directory, "repo");
+    await repository(root);
+    const startingRevision = await git(root, "rev-parse", "HEAD");
+    const result = await quiet(() => executeLocalCommand({
+      repository: "example/project",
+      kind: "verify",
+      command: ["git", "commit", "--allow-empty", "-m", "generated"],
+      cwd: root,
+      outputMode: "json",
+      store: new JsonlEventStore(join(directory, "events.jsonl")),
+    }));
+    assert.equal(result.revision, startingRevision);
+    assert.equal(result.revisionChanged, true);
+    assert.notEqual(result.revisionAfter, startingRevision);
+    assert.equal(result.observation.data.relationships.revision, startingRevision);
+    assert.equal(result.observation.data.status, "warning");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("post-run Git inspection failure still leaves a warning receipt", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proofwake-run-post-inspection-"));
+  try {
+    const root = join(directory, "repo");
+    await repository(root);
+    const gitDirectory = join(root, ".git");
+    const result = await quiet(() => executeLocalCommand({
+      repository: "example/project",
+      kind: "verify",
+      command: [process.execPath, "-e", `require("node:fs").rmSync(${JSON.stringify(gitDirectory)}, { recursive: true, force: true })`],
+      cwd: root,
+      outputMode: "json",
+      store: new JsonlEventStore(join(directory, "events.jsonl")),
+    }));
+    assert.equal(result.postInspectionUnavailable, true);
+    assert.equal(result.observation.data.status, "warning");
+    assert.equal(factMap(result.observation).get("proofwake.command.post-inspection-unavailable"), true);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
