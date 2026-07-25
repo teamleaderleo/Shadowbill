@@ -11,6 +11,7 @@ const DELIVERY_DEFAULTS = {
   lastDeliveryError: "",
   lastDeliveryErrorAt: "",
 };
+const DEFAULT_COLLECTOR_PERMISSION = collectorPermissionPattern(DEFAULTS.collectorUrl);
 
 function setStatus(kind, message) {
   const status = document.getElementById("status");
@@ -76,10 +77,9 @@ async function load() {
   renderDeliveryHealth(config);
 }
 
-async function ensureCollectorPermission(pattern) {
-  const request = { origins: [pattern] };
-  if (await chrome.permissions.contains(request)) return true;
-  return chrome.permissions.request(request);
+function ensureCollectorPermission(pattern) {
+  if (pattern === DEFAULT_COLLECTOR_PERMISSION) return Promise.resolve(true);
+  return chrome.permissions.request({ origins: [pattern] });
 }
 
 document.getElementById("save").addEventListener("click", async () => {
