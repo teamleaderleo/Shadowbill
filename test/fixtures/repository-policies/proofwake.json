@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "repository": {
+    "kind": "remote",
+    "id": "teamleaderleo/proofwake",
+    "provider": "github"
+  },
+  "lifecycle": {
+    "state": "active",
+    "dormantAfterDays": 30
+  },
+  "signals": [
+    {
+      "kind": "verify",
+      "requirement": "required",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "github-ci",
+      "requirement": "required",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["github"]
+    },
+    {
+      "kind": "local-diagnostic",
+      "requirement": "optional",
+      "subject": "repository",
+      "freshness": { "mode": "duration", "hours": 24 },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "shadowbill-estimate",
+      "requirement": "optional",
+      "subject": "repository",
+      "freshness": { "mode": "none" },
+      "acceptedSources": ["manual"]
+    }
+  ],
+  "adapters": []
+}
