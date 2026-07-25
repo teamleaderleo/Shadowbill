@@ -95,6 +95,24 @@ test("committed policy is authoritative and detached HEAD is visible", async () 
   });
 });
 
+test("requires committed policy to be tracked and clean", async () => {
+  await temporaryDirectory(async (directory) => {
+    const root = await createRepository(join(directory, "repo"), { remote: "https://github.com/example/project.git" });
+    const policy = {
+      version: 1,
+      repository: "example/project",
+      expectedSignals: [],
+      adapters: {},
+    };
+    await writeFile(join(root, ".proofwake.json"), JSON.stringify(policy));
+    await assert.rejects(inspectRepositoryEnrollment(root), (error) => error.code === "REPOSITORY_POLICY_UNTRACKED");
+    await git(root, "add", ".proofwake.json");
+    await git(root, "commit", "-m", "policy");
+    await writeFile(join(root, ".proofwake.json"), JSON.stringify({ ...policy, lifecycle: "dormant" }));
+    await assert.rejects(inspectRepositoryEnrollment(root), (error) => error.code === "REPOSITORY_POLICY_DIRTY");
+  });
+});
+
 test("rejects symlinked committed policy", { skip: process.platform === "win32" }, async () => {
   await temporaryDirectory(async (directory) => {
     const root = await createRepository(join(directory, "repo"));

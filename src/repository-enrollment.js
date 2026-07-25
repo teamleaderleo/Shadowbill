@@ -164,6 +164,16 @@ export async function inspectRepositoryEnrollment(inputPath, options = {}) {
     if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
   }
   const committedPolicy = await readRepositoryPolicyFile(configPath);
+  if (committedPolicy) {
+    const tracked = await git(root, ["ls-files", "--error-unmatch", "--", ".proofwake.json"], { allowFailure: true });
+    if (!tracked) {
+      fail("REPOSITORY_POLICY_UNTRACKED", ".proofwake.json must be tracked by Git before it can become authoritative.", "$.configuration");
+    }
+    const dirty = await git(root, ["status", "--porcelain=v1", "--untracked-files=all", "--", ".proofwake.json"], { allowFailure: true });
+    if (dirty) {
+      fail("REPOSITORY_POLICY_DIRTY", ".proofwake.json has uncommitted changes.", "$.configuration");
+    }
+  }
   if (committedPolicy && options.lifecycle !== undefined && committedPolicy.lifecycle !== options.lifecycle) {
     fail("REPOSITORY_LIFECYCLE_CONFLICT", "--lifecycle conflicts with committed .proofwake.json.", "$.lifecycle");
   }

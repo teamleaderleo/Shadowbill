@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -54,6 +54,16 @@ test("serializes concurrent registry writers", async () => {
       right.enroll(proposal(join(directory, "right"), "example/right")),
     ]);
     assert.deepEqual((await left.read()).entries.map((entry) => entry.repository), ["example/left", "example/right"]);
+  });
+});
+
+test("rejects a symbolic-link registry", { skip: process.platform === "win32" }, async () => {
+  await temporaryDirectory(async (directory) => {
+    const target = join(directory, "target.json");
+    const path = join(directory, "repositories.json");
+    await writeFile(target, '{"version":1,"entries":[]}');
+    await symlink(target, path);
+    await assert.rejects(new RepositoryRegistryStore(path).read(), (error) => error.code === "REPOSITORY_REGISTRY_SYMLINK");
   });
 });
 

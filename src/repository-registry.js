@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { chmod, lstat, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { normalizeRepositoryPolicy, repositoryPolicyDigest } from "./repository-policy.js";
 import { parseStrictJson } from "./strict-json.js";
@@ -115,16 +116,28 @@ export function validateRepositoryRegistry(value) {
 }
 
 async function readRegistry(path) {
-  let handle;
+  let pathMetadata;
   try {
-    handle = await open(path, "r");
+    pathMetadata = await lstat(path);
   } catch (error) {
     if (isCode(error, "ENOENT")) return { version: 1, entries: [] };
+    throw error;
+  }
+  if (pathMetadata.isSymbolicLink()) fail("REPOSITORY_REGISTRY_SYMLINK", "Repository registry must not be a symbolic link.");
+  if (!pathMetadata.isFile()) fail("REPOSITORY_REGISTRY_NOT_FILE", "Repository registry must be a regular file.");
+  let handle;
+  try {
+    handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if (isCode(error, "ELOOP")) fail("REPOSITORY_REGISTRY_SYMLINK", "Repository registry must not be a symbolic link.");
     throw error;
   }
   try {
     const before = await handle.stat();
     if (!before.isFile()) fail("REPOSITORY_REGISTRY_NOT_FILE", "Repository registry must be a regular file.");
+    if (before.dev !== pathMetadata.dev || before.ino !== pathMetadata.ino) {
+      fail("REPOSITORY_REGISTRY_CHANGED", "Repository registry changed before it was opened.");
+    }
     if (before.size > REGISTRY_MAX_BYTES) fail("REPOSITORY_REGISTRY_TOO_LARGE", `Repository registry exceeds ${REGISTRY_MAX_BYTES} bytes.`);
     const bytes = await handle.readFile();
     if (bytes.length > REGISTRY_MAX_BYTES) fail("REPOSITORY_REGISTRY_TOO_LARGE", `Repository registry exceeds ${REGISTRY_MAX_BYTES} bytes.`);
