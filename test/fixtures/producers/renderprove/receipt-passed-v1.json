@@ -1,0 +1,67 @@
+{
+  "$schema": "https://raw.githubusercontent.com/teamleaderleo/renderprove/main/schema/receipt-v1.schema.json",
+  "version": 1,
+  "project": "fixture-web-app",
+  "source": {
+    "manifest": ".renderprove.json"
+  },
+  "target": {
+    "baseUrl": "https://fixture.example"
+  },
+  "startedAt": "2026-07-25T16:00:00.000Z",
+  "finishedAt": "2026-07-25T16:00:03.250Z",
+  "durationMs": 3250,
+  "status": "passed",
+  "summary": {
+    "cases": 1,
+    "passed": 1,
+    "failed": 0,
+    "diagnostics": 0
+  },
+  "runtime": {
+    "mode": "remote",
+    "logs": null
+  },
+  "cases": [
+    {
+      "id": "home-desktop",
+      "status": "passed",
+      "startedAt": "2026-07-25T16:00:01.000Z",
+      "finishedAt": "2026-07-25T16:00:03.000Z",
+      "route": {
+        "name": "home",
+        "path": "/",
+        "requestedUrl": "https://fixture.example/",
+        "finalUrl": "https://fixture.example/"
+      },
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900,
+        "deviceScaleFactor": 1
+      },
+      "navigation": {
+        "status": 200,
+        "ok": true
+      },
+      "page": {
+        "title": "Fixture application",
+        "lang": "en",
+        "bodyTextLength": 240,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "scrollHeight": 900,
+        "clientHeight": 900
+      },
+      "artifacts": [
+        {
+          "kind": "screenshot",
+          "path": ".renderprove/artifacts/home-desktop.png",
+          "mimeType": "image/png",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "diagnostics": []
+    }
+  ]
+}

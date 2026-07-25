@@ -70,6 +70,15 @@ async function syncAppend(path, content) {
   }
 }
 
+export class EventIdConflictError extends Error {
+  constructor(id) {
+    super(`Event identity was reused with different semantics: ${id}`);
+    this.name = "EventIdConflictError";
+    this.code = "EVENT_ID_CONFLICT";
+    this.id = id;
+  }
+}
+
 export class JsonlEventStore {
   #writeQueue = Promise.resolve();
 
@@ -137,21 +146,23 @@ export class JsonlEventStore {
     await truncate(this.path, validPrefix.length);
   }
 
-  /**
-   * Appends an event once. Returns false when its ID already exists.
-   * @param {import('./types.js').ShadowbillEvent} event
-   * @returns {Promise<boolean>}
-   */
-  append(event) {
+  #enqueueAppend(event, requestFingerprint) {
     const operation = this.#writeQueue.then(async () => {
       const release = await this.#acquireLock();
       try {
         const ledger = await readLedger(this.path);
-        if (ledger.events.some((existing) => existing.id === event.id)) return false;
+        const existing = ledger.events.find((value) => value.id === event.id);
+        if (existing) {
+          if (requestFingerprint === undefined) return false;
+          if (existing.requestFingerprint === requestFingerprint) {
+            return { status: "duplicate", event: existing };
+          }
+          throw new EventIdConflictError(event.id);
+        }
         await this.#repairTrailingPartial(ledger);
         const separator = ledger.trailingPartialStart === null && ledger.needsSeparator ? "\n" : "";
         await syncAppend(this.path, `${separator}${JSON.stringify(event)}\n`);
-        return true;
+        return requestFingerprint === undefined ? true : { status: "inserted", event };
       } finally {
         await release();
       }
@@ -159,6 +170,27 @@ export class JsonlEventStore {
 
     this.#writeQueue = operation.then(() => undefined, () => undefined);
     return operation;
+  }
+
+  /**
+   * Appends an event once. Returns false when its ID already exists.
+   * @param {import('./types.js').ShadowbillEvent} event
+   * @returns {Promise<boolean>}
+   */
+  append(event) {
+    return this.#enqueueAppend(event, undefined);
+  }
+
+  /**
+   * Appends an event with semantic duplicate detection.
+   * @param {{id: string, requestFingerprint: string}} event
+   * @returns {Promise<{status: 'inserted'|'duplicate', event: object}>}
+   */
+  appendIdempotent(event) {
+    if (!event || typeof event !== "object" || typeof event.id !== "string" || typeof event.requestFingerprint !== "string") {
+      throw new TypeError("Idempotent events require string id and requestFingerprint fields");
+    }
+    return this.#enqueueAppend(event, event.requestFingerprint);
   }
 
   /** @returns {Promise<import('./types.js').ShadowbillEvent[]>} */

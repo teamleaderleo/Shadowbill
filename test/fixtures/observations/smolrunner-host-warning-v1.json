@@ -1,0 +1,56 @@
+{
+  "specversion": "1.0",
+  "id": "smolrunner.fixture-host.bbbbbbbbbbbbbbbb",
+  "source": "urn:proofwake:adapter:smolrunner",
+  "type": "dev.proofwake.observation.host-diagnostic.v1",
+  "subject": "host:fixture-linux-runner",
+  "time": "2026-07-25T16:10:00.000Z",
+  "dataschema": "urn:proofwake:schema:observation:v1",
+  "data": {
+    "schemaVersion": 1,
+    "adapter": {
+      "name": "smolrunner",
+      "version": "0.1.0",
+      "mappingVersion": 1,
+      "trust": "local-operator",
+      "sourceSchema": "smolrunner.doctor",
+      "sourceSchemaVersion": "1"
+    },
+    "kind": "host-diagnostic",
+    "status": "warning",
+    "timeSource": "adapter",
+    "observedAt": "2026-07-25T16:10:00.000Z",
+    "ingestedAt": "2026-07-25T16:10:01.000Z",
+    "relationships": {
+      "repository": "teamleaderleo/smolrunner",
+      "correlations": ["installation.fixture-linux-runner"]
+    },
+    "facts": [
+      { "name": "smolrunner.overall", "value": "warn" },
+      { "name": "smolrunner.check.operating-system", "value": "pass" },
+      { "name": "smolrunner.check.architecture", "value": "pass" },
+      { "name": "smolrunner.check.systemd", "value": "warn" },
+      { "name": "smolrunner.check.command-git", "value": "pass" }
+    ],
+    "evidence": [
+      {
+        "uri": "urn:smolrunner:doctor:fixture-linux-runner:bbbbbbbbbbbbbbbb",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "mediaType": "application/json",
+        "producer": "smolrunner",
+        "schema": "smolrunner.doctor.v1",
+        "state": "verified",
+        "disclosure": "restricted-reference"
+      }
+    ],
+    "coverage": {
+      "state": "partial",
+      "redacted": true,
+      "truncated": false,
+      "omitted": [
+        "smolrunner.redacted.summary",
+        "smolrunner.redacted.detail"
+      ]
+    }
+  }
+}

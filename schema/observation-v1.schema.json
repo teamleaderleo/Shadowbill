@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/teamleaderleo/proofwake/main/schema/observation-v1.schema.json",
+  "title": "Proofwake observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["specversion", "id", "source", "type", "subject", "time", "dataschema", "data"],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": { "$ref": "#/$defs/eventToken" },
+    "source": { "$ref": "#/$defs/absoluteUri" },
+    "type": { "$ref": "#/$defs/eventType" },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "oneOf": [
+        { "pattern": "^repo:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@sha:[a-f0-9]{40}$" },
+        { "pattern": "^repo:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        { "pattern": "^host:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        { "pattern": "^service:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+        { "pattern": "^deployment:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+        { "pattern": "^run:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+        { "pattern": "^artifact:sha256:[a-f0-9]{64}$" }
+      ]
+    },
+    "time": { "$ref": "#/$defs/timestamp" },
+    "dataschema": { "const": "urn:proofwake:schema:observation:v1" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "adapter", "kind", "status", "timeSource", "observedAt", "ingestedAt",
+        "relationships", "facts", "evidence", "coverage"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "adapter": { "$ref": "#/$defs/adapter" },
+        "kind": {
+          "enum": [
+            "verify", "github-ci", "browser-review", "deployment", "service-check", "domain-check",
+            "host-diagnostic", "local-diagnostic", "shadowbill-estimate"
+          ]
+        },
+        "status": { "enum": ["passed", "failed", "warning", "unknown", "unavailable", "cancelled"] },
+        "timeSource": { "enum": ["producer", "provider", "adapter"] },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "ingestedAt": { "$ref": "#/$defs/timestamp" },
+        "durationMs": { "type": "integer", "minimum": 0, "maximum": 31536000000 },
+        "relationships": { "$ref": "#/$defs/relationships" },
+        "facts": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/fact" } },
+        "evidence": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/evidence" } },
+        "coverage": { "$ref": "#/$defs/coverage" }
+      }
+    }
+  },
+  "$defs": {
+    "eventToken": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "safeFactToken": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "namespacedName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"
+    },
+    "absoluteUri": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]*$"
+    },
+    "eventType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "repository": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "mappingVersion", "trust", "sourceSchema", "sourceSchemaVersion"],
+      "properties": {
+        "name": { "$ref": "#/$defs/token" },
+        "version": { "$ref": "#/$defs/token" },
+        "mappingVersion": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "trust": {
+          "enum": [
+            "local-operator", "signed-provider", "verified-receipt", "authenticated-client", "untrusted-observation"
+          ]
+        },
+        "sourceSchema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "oneOf": [
+            { "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+            { "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]*$" }
+          ]
+        },
+        "sourceSchemaVersion": { "$ref": "#/$defs/token" }
+      }
+    },
+    "relationships": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "run": { "$ref": "#/$defs/token" },
+        "workflowAttempt": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "deployment": { "$ref": "#/$defs/token" },
+        "service": { "$ref": "#/$defs/token" },
+        "causation": { "$ref": "#/$defs/token" },
+        "correlations": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/token" }
+        }
+      },
+      "dependentRequired": { "revision": ["repository"] }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "$ref": "#/$defs/namespacedName" },
+        "value": {
+          "oneOf": [
+            { "$ref": "#/$defs/safeFactToken" },
+            { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+            { "type": "boolean" }
+          ]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "digest", "mediaType", "producer", "schema", "state", "disclosure"],
+      "properties": {
+        "uri": { "$ref": "#/$defs/absoluteUri" },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 1000000000000 },
+        "mediaType": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+        },
+        "producer": { "$ref": "#/$defs/token" },
+        "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "state": { "enum": ["verified", "unavailable", "redacted", "truncated"] },
+        "disclosure": {
+          "enum": ["public-metadata", "private-metadata", "restricted-reference", "content-excluded"]
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "redacted", "truncated", "omitted"],
+      "properties": {
+        "state": { "enum": ["complete", "partial", "unavailable"] },
+        "redacted": { "type": "boolean" },
+        "truncated": { "type": "boolean" },
+        "omitted": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/namespacedName" }
+        }
+      }
+    }
+  }
+}
