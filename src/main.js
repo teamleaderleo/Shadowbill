@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
+import { runEnrollCommand, runRepositoriesCommand } from "./repository-cli.js";
 import { JsonlEventStore } from "./store.js";
 
 class EmitUsageError extends Error {
@@ -19,6 +20,10 @@ The evidence trail behind every revision.
 Commands:
   emit --json FILE [--data PATH] [--output human|json]
   emit --stdin [--data PATH] [--output human|json]
+  enroll PATH [--policy FILE] [--repository owner/name] [--lifecycle active|dormant]
+              [--write] [--approve-autodetected] [--replace]
+              [--registry PATH] [--data PATH] [--output human|json]
+  repositories [--registry PATH] [--data PATH] [--output human|json]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
   mcp [--allow-writes]
@@ -27,8 +32,8 @@ Commands:
   ingest-git [--repo PATH]
   hook install [PATH]
 
-Emit accepts one complete Proofwake observation v1 document. --json selects an input file;
---output json selects machine-readable command output.
+Emit accepts one complete Proofwake observation v1 document. Enrolment is a dry run
+unless --write is supplied. A tracked, clean .proofwake.json is authoritative.
 
 Legacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`;
 }
@@ -150,6 +155,10 @@ if (command === undefined || command === "help" || command === "--help" || comma
   console.log(help());
 } else if (command === "emit") {
   await runEmit(process.argv.slice(3));
+} else if (command === "enroll") {
+  await runEnrollCommand(process.argv.slice(3));
+} else if (command === "repositories") {
+  await runRepositoriesCommand(process.argv.slice(3));
 } else {
   await import("./cli.js");
 }

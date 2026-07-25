@@ -32,7 +32,7 @@ test("stores an observation in a rebuildable ledger record", async () => {
   });
 });
 
-test("returns the original accepted effect for semantic replay", async () => {
+test("returns the accepted effect for semantic replay", async () => {
   await temporaryLedger(async ({ path }) => {
     const observation = await fixture();
     const left = new ObservationLedger(new JsonlEventStore(path));
@@ -41,9 +41,11 @@ test("returns the original accepted effect for semantic replay", async () => {
     replay.data.ingestedAt = "2026-07-25T17:00:00.000Z";
     const results = await Promise.all([left.append(observation), right.append(replay)]);
     assert.deepEqual(results.map((value) => value.status).sort(), ["duplicate", "inserted"]);
+    const inserted = results.find((value) => value.status === "inserted");
     const duplicate = results.find((value) => value.status === "duplicate");
-    assert.equal(duplicate.observation.data.ingestedAt, observation.data.ingestedAt);
-    assert.equal((await new JsonlEventStore(path).readAll()).length, 1);
+    assert.deepEqual(duplicate.observation, inserted.observation);
+    const [stored] = await new JsonlEventStore(path).readAll();
+    assert.deepEqual(stored.observation, inserted.observation);
   });
 });
 
