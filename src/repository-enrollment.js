@@ -4,11 +4,10 @@ import { readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { repositoryIdentifier } from "./git.js";
-import { validateRepositoryPolicy } from "./repository-policy.js";
+import { repositoryPolicyFingerprint, validateRepositoryPolicy } from "./repository-policy.js";
 import {
   inspectAdapterPaths,
   readRepositoryPolicyFile,
-  repositoryPolicyFingerprint,
   repositoryPolicyIdentity,
   repositoryPolicyLabel,
 } from "./repository-policy-file.js";
