@@ -178,7 +178,7 @@ function normalizeSignal(signal, index) {
 
 function validateReceiptPath(value, path) {
   string(value, path, { max: 512 });
-  if (value.includes("\\") || value.startsWith("/") || /^[a-z]:/iu.test(value) || value.includes("\0")) {
+  if (value.includes("\\") || value.includes(":") || /\s/u.test(value) || value.startsWith("/") || value.includes("\0")) {
     fail("REPOSITORY_POLICY_PATH_ESCAPE", "Receipt path must be a portable repository-relative path.", path);
   }
   const segments = value.split("/");
