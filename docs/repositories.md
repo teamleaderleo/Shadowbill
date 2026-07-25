@@ -43,7 +43,7 @@ The default registry is `repositories.json` beside the active observation ledger
 
 A repository may commit `.proofwake.json`. This file is authoritative after explicit enrolment. Proofwake re-reads it for inventory reports so reviewed repository changes take effect without copying policy into the observation ledger.
 
-The committed file must be a regular UTF-8 JSON file inside the checkout. Symbolic links, duplicate keys, unsupported versions, unknown fields, oversized input, and invalid adapter paths fail closed.
+The committed file must be a tracked, clean, regular UTF-8 JSON file inside the checkout. Untracked or locally modified policy remains a proposal instead of authoritative configuration. Symbolic links, duplicate keys, unsupported versions, unknown fields, oversized input, and invalid adapter paths fail closed.
 
 ### Approved global policy
 
@@ -117,7 +117,7 @@ The registry records:
 - normalized policy and SHA-256 digest;
 - explicit approval time and method.
 
-The file is written atomically with owner-only permissions where supported. Writers coordinate through a private lock directory. Duplicate repository identities and duplicate roots fail closed. Replacing a checkout requires `--replace`.
+The file is written atomically with owner-only permissions where supported. Writers coordinate through a private lock directory. Registry reads reject symbolic links and verify the opened file identity before parsing. Duplicate repository identities and duplicate roots fail closed. Replacing a checkout requires `--replace`.
 
 Checkout roots are private metadata. They remain in the local registry and never enter observation events or fleet exports unless the caller explicitly requests the local inventory response.
 
