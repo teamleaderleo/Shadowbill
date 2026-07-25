@@ -4,13 +4,7 @@
 
 A repository policy declares which evidence Proofwake expects for one project. It is repository-owned configuration, not an execution script.
 
-The committed filename is:
-
-```text
-.proofwake.json
-```
-
-The schema identifier is:
+The committed filename is `.proofwake.json`. The schema identifier is:
 
 ```text
 urn:proofwake:schema:repository-policy:v1
@@ -24,15 +18,7 @@ A valid `.proofwake.json` committed in the selected repository is authoritative 
 
 Autodetection may later propose a policy, but a proposal does not become authoritative until the operator writes the committed file or explicitly approves an entry in the local global registry.
 
-The future global registry will wrap the same validated policy with local-only metadata such as:
-
-- repository root;
-- configuration source;
-- approval timestamp;
-- last inspection time;
-- local adapter readiness.
-
-Those values do not belong in committed policy.
+The future global registry will wrap the same validated policy with local-only metadata such as repository root, configuration source, approval timestamp, last inspection time, and adapter readiness. Those values do not belong in committed policy.
 
 ## Privacy boundary
 
@@ -68,6 +54,7 @@ Receipt adapters name one portable repository-relative file. Runtime ingestion m
       "kind": "verify",
       "requirement": "required",
       "subject": "revision",
+      "appliesTo": "every-revision",
       "freshness": { "mode": "revision" },
       "acceptedSources": ["local-command"]
     },
@@ -75,6 +62,7 @@ Receipt adapters name one portable repository-relative file. Runtime ingestion m
       "kind": "browser-review",
       "requirement": "required",
       "subject": "revision",
+      "appliesTo": "every-revision",
       "freshness": { "mode": "revision" },
       "acceptedSources": ["adapter:renderprove"]
     }
@@ -115,9 +103,7 @@ The identifier is canonical lowercase `owner/name`. Proofwake does not infer aut
 }
 ```
 
-A local-only identity uses a generated digest and a bounded display slug. It does not disclose a local path.
-
-Remote and local identity fields are mutually exclusive.
+A local-only identity uses a generated digest and a bounded display slug. It does not disclose a local path. Remote and local identity fields are mutually exclusive.
 
 ## Lifecycle
 
@@ -140,7 +126,7 @@ Active policy requires at least one required signal. Dormant policy cannot requi
 
 ## Expected signals
 
-Policy v1 uses the same projection vocabulary selected for the five-repository pilot:
+Policy v1 uses the projection vocabulary selected for the five-repository pilot:
 
 - `verify`;
 - `github-ci`;
@@ -152,16 +138,55 @@ Policy v1 uses the same projection vocabulary selected for the five-repository p
 - `local-diagnostic`;
 - `shadowbill-estimate`.
 
-Each kind appears at most once.
+Each kind appears at most once. Renderprove's pinned renderer probe maps to optional `domain-check`; producer-native type and evidence still preserve its narrower meaning.
 
 A signal declares:
 
 - `requirement`: `required` or `optional`;
 - `subject`: `revision`, `repository`, `host`, `service`, or `deployment`;
+- `appliesTo`;
 - `freshness`;
 - one or more accepted sources.
 
-### Freshness
+## Applicability
+
+Applicability says which selected entity the signal policy covers. It is separate from the observation subject type.
+
+Revision observations may apply to:
+
+- `every-revision`;
+- `default-branch`;
+- `deployed-revision`;
+- `release`.
+
+Other subject types have one matching applicability:
+
+- repository subject → `repository`;
+- host subject → `host`;
+- service subject → `service`;
+- deployment subject → `deployment`.
+
+Examples:
+
+```json
+{
+  "kind": "github-ci",
+  "subject": "revision",
+  "appliesTo": "default-branch"
+}
+```
+
+```json
+{
+  "kind": "browser-review",
+  "subject": "revision",
+  "appliesTo": "deployed-revision"
+}
+```
+
+The validator rejects subject/applicability combinations that cannot be projected consistently.
+
+## Freshness
 
 Revision freshness means evidence must match the selected exact revision:
 
@@ -191,15 +216,9 @@ Built-in source names are:
 - `github`;
 - `manual`.
 
-A declared adapter is referenced as:
+A declared adapter is referenced as `adapter:renderprove`. Every adapter source must resolve to one adapter in the same policy. Source entries and adapter names are unique.
 
-```text
-adapter:renderprove
-```
-
-Every adapter source must resolve to one adapter in the same policy. Source entries and adapter names are unique.
-
-Accepted source names declare which producer classes may satisfy the policy. They do not make an observation authoritative by themselves; observation trust and source validation still apply.
+Accepted source names declare which producer classes may satisfy a signal kind. They do not make an observation authoritative by themselves; observation type, trust, repository binding, subject, and source validation still apply.
 
 ## Receipt-file adapters
 
@@ -221,12 +240,9 @@ The path:
 - is relative to the approved repository root;
 - names one file rather than a glob;
 - contains no empty, current, or parent segment;
-- contains no Windows drive prefix;
-- contains no backslash.
+- contains no colon, whitespace, Windows drive prefix, or backslash.
 
-The schema is a stable token or absolute URI. Trust uses the observation-v1 trust vocabulary.
-
-Policy validation does not read the receipt. Runtime adapter readiness and receipt ingestion remain separate operations.
+The schema is a stable token or absolute URI. Trust uses the observation-v1 trust vocabulary. Policy validation does not read the receipt; adapter readiness and receipt ingestion remain separate operations.
 
 ## Normalisation and fingerprint
 
@@ -236,21 +252,11 @@ The validator returns a normalised policy:
 - object fields are copied through exact allowlists;
 - no undeclared values survive validation.
 
-`repositoryPolicyFingerprint(policy)` validates the policy, canonicalises object-key order, preserves array order, and returns a SHA-256 digest.
-
-The fingerprint lets the future registry detect policy changes without treating filesystem timestamps as authority.
+`repositoryPolicyFingerprint(policy)` validates the policy, canonicalises object-key order, preserves array order, and returns a SHA-256 digest. The future registry can use this fingerprint to detect policy changes without treating filesystem timestamps as authority.
 
 ## Five-repository pilot
 
-Valid policy fixtures exist for:
-
-- Proofwake;
-- Renderprove;
-- SmolRunner;
-- Stensibly;
-- One More Legend.
-
-They encode the expected signals selected in [`five-repository-pilot.md`](five-repository-pilot.md) and provide the first fixtures for enrolment and fleet projection work.
+Valid policy fixtures exist for Proofwake, Renderprove, SmolRunner, Stensibly, and One More Legend. They encode the expected signals and applicability selected in [`five-repository-pilot.md`](five-repository-pilot.md).
 
 ## Stable validator failures
 
@@ -264,6 +270,7 @@ Initial codes include:
 - `REPOSITORY_POLICY_DUPLICATE_VALUE`;
 - `REPOSITORY_POLICY_IDENTITY_CONFLICT`;
 - `REPOSITORY_POLICY_LIFECYCLE_CONFLICT`;
+- `REPOSITORY_POLICY_APPLICABILITY_CONFLICT`;
 - `REPOSITORY_POLICY_FRESHNESS_CONFLICT`;
 - `REPOSITORY_POLICY_PATH_ESCAPE`;
 - `REPOSITORY_POLICY_ADAPTER_MISSING`.
