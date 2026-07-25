@@ -1,16 +1,12 @@
-const DEFAULTS = {
-  enabled: true,
-  collectorUrl: "http://127.0.0.1:7337",
-  collectorToken: "",
-  model: "gpt-5.6-sol",
-  reasoningEffort: "high"
-};
+const configHelpers = globalThis.ShadowbillConfig;
+const DEFAULTS = configHelpers.DEFAULTS;
 
 const tracked = new Map();
 const emitted = new Set(JSON.parse(sessionStorage.getItem("shadowbill:emitted") || "[]"));
 const firstSeenByTurn = JSON.parse(sessionStorage.getItem("shadowbill:first-seen") || "{}");
 const tracker = globalThis.ShadowbillTurnTracker;
 const MINIMUM_QUIET_MS = 5_000;
+let lastFailureRecordedAt = 0;
 
 function estimateTokens(text) {
   if (!text) return 0;
@@ -31,6 +27,34 @@ function roleMessages() {
 
 async function settings() {
   return { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+}
+
+async function recordDeliverySuccess(capturedAt) {
+  lastFailureRecordedAt = 0;
+  try {
+    await chrome.storage.local.set({
+      lastDeliveryAt: capturedAt,
+      lastDeliveryError: "",
+      lastDeliveryErrorAt: "",
+    });
+  } catch {
+    // Delivery already succeeded; health metadata is best-effort.
+  }
+}
+
+async function recordDeliveryFailure(error) {
+  const now = Date.now();
+  if (now - lastFailureRecordedAt < 30_000) return;
+  lastFailureRecordedAt = now;
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    await chrome.storage.local.set({
+      lastDeliveryError: message.slice(0, 160) || "Collector unavailable.",
+      lastDeliveryErrorAt: new Date(now).toISOString(),
+    });
+  } catch {
+    // Capture retries continue even when health metadata cannot be stored.
+  }
 }
 
 function hasCompletionControls(element) {
@@ -147,11 +171,15 @@ async function emitAssistant(element, state) {
     });
     if (!response.ok) throw new Error(`Shadowbill collector returned ${response.status}`);
 
+    await recordDeliverySuccess(capturedAt);
     emitted.add(eventId);
     const recent = Array.from(emitted).slice(-500);
     sessionStorage.setItem("shadowbill:emitted", JSON.stringify(recent));
     state.lastEmittedCaptureHash = captureHash;
     state.dirty = false;
+  } catch (error) {
+    await recordDeliveryFailure(error);
+    throw error;
   } finally {
     state.inFlight = false;
   }
