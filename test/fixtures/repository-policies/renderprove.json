@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "repository": {
+    "kind": "remote",
+    "id": "teamleaderleo/renderprove",
+    "provider": "github"
+  },
+  "lifecycle": {
+    "state": "active",
+    "dormantAfterDays": 30
+  },
+  "signals": [
+    {
+      "kind": "verify",
+      "requirement": "required",
+      "subject": "revision",
+      "appliesTo": "every-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "browser-review",
+      "requirement": "required",
+      "subject": "revision",
+      "appliesTo": "every-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["adapter:renderprove"]
+    },
+    {
+      "kind": "domain-check",
+      "requirement": "optional",
+      "subject": "revision",
+      "appliesTo": "every-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "github-ci",
+      "requirement": "optional",
+      "subject": "revision",
+      "appliesTo": "default-branch",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["github"]
+    }
+  ],
+  "adapters": [
+    {
+      "name": "renderprove",
+      "type": "receipt-file",
+      "path": ".renderprove/receipt.json",
+      "schema": "renderprove.receipt.v1",
+      "trust": "verified-receipt"
+    }
+  ]
+}

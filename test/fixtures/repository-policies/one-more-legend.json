@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "repository": {
+    "kind": "remote",
+    "id": "teamleaderleo/one-more-legend",
+    "provider": "github"
+  },
+  "lifecycle": {
+    "state": "active",
+    "dormantAfterDays": 30
+  },
+  "signals": [
+    {
+      "kind": "verify",
+      "requirement": "required",
+      "subject": "revision",
+      "appliesTo": "every-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "domain-check",
+      "requirement": "required",
+      "subject": "revision",
+      "appliesTo": "every-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "deployment",
+      "requirement": "required",
+      "subject": "deployment",
+      "appliesTo": "deployment",
+      "freshness": { "mode": "duration", "hours": 24 },
+      "acceptedSources": ["github"]
+    },
+    {
+      "kind": "browser-review",
+      "requirement": "optional",
+      "subject": "revision",
+      "appliesTo": "deployed-revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["adapter:renderprove"]
+    },
+    {
+      "kind": "service-check",
+      "requirement": "optional",
+      "subject": "service",
+      "appliesTo": "service",
+      "freshness": { "mode": "duration", "hours": 24 },
+      "acceptedSources": ["manual"]
+    }
+  ],
+  "adapters": [
+    {
+      "name": "renderprove",
+      "type": "receipt-file",
+      "path": ".renderprove/receipt.json",
+      "schema": "renderprove.receipt.v1",
+      "trust": "verified-receipt"
+    }
+  ]
+}
