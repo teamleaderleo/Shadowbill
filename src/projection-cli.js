@@ -1,7 +1,8 @@
 import { dirname, join, resolve } from "node:path";
+import { buildFleetProjection } from "./fleet-projection.js";
 import { resolveStorageIdentity } from "./identity.js";
 import { RepositoryRegistryStore } from "./repository-registry.js";
-import { buildFleetProjection, buildRevisionProjection } from "./revision-projection.js";
+import { buildRevisionProjection } from "./revision-projection.js";
 import { JsonlEventStore } from "./store.js";
 
 export class ProjectionCliUsageError extends Error {
