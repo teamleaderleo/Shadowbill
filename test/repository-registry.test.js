@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -60,6 +60,19 @@ test("registry persists committed enrolment across store restarts", async () => 
     assert.equal(registry.entries[0].enrolledAt, "2026-07-26T12:00:00.000Z");
     const raw = await readFile(path, "utf8");
     assert.doesNotMatch(raw, /token|secret|command/u);
+  });
+});
+
+test("registry rejects symbolic-link indirection", async () => {
+  await temporary(async (directory) => {
+    const target = join(directory, "target.json");
+    const path = join(directory, "repositories.json");
+    await writeFile(target, JSON.stringify({ version: 1, entries: [] }), "utf8");
+    await symlink(target, path);
+    await assert.rejects(
+      new RepositoryRegistryStore(path).read(),
+      (error) => error.code === "REPOSITORY_REGISTRY_SYMLINK",
+    );
   });
 });
 
