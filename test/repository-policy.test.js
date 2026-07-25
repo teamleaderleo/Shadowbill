@@ -96,12 +96,14 @@ test("signal kinds, sources, and adapter names must be unique and resolved", asy
   );
 });
 
-test("receipt adapters reject path escape, absolute paths, globs, and backslashes", async () => {
+test("receipt adapters reject non-portable paths and path escape", async () => {
   const policy = await fixture("renderprove");
   for (const path of [
     "../private.json",
     "/tmp/receipt.json",
     "C:/private/receipt.json",
+    "dir/file:name.json",
+    "dir/file name.json",
     ".proofwake//receipt.json",
     ".proofwake/*.json",
     ".proofwake\\receipt.json",
@@ -179,4 +181,5 @@ test("published schema identifies repository policy v1 and fails closed", async 
   assert.ok(schema.$defs.freshness.oneOf.every((variant) => variant.additionalProperties === false));
   assert.equal(schema.$defs.signal.additionalProperties, false);
   assert.equal(schema.$defs.adapter.additionalProperties, false);
+  assert.doesNotThrow(() => new RegExp(schema.$defs.adapter.properties.path.pattern, "u"));
 });
