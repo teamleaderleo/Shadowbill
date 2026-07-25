@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proofwake:schema:observation:1",
+  "title": "Proofwake Observation v1",
+  "description": "A content-minimised CloudEvents 1.0 envelope for repository and revision observations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "subject",
+    "datacontenttype",
+    "dataschema",
+    "data"
+  ],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": { "$ref": "#/$defs/boundedString128" },
+    "source": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 },
+    "type": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$" },
+    "time": { "type": "string", "format": "date-time", "maxLength": 100 },
+    "subject": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "datacontenttype": { "const": "application/json" },
+    "dataschema": { "const": "urn:proofwake:schema:observation:1" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "boundedString128": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "trust"],
+      "properties": {
+        "name": { "$ref": "#/$defs/slug" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "trust": {
+          "enum": [
+            "local-operator",
+            "signed-provider",
+            "verified-receipt",
+            "authenticated-client",
+            "untrusted-observation"
+          ]
+        }
+      }
+    },
+    "repository": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "const": "remote" },
+            "id": {
+              "type": "string",
+              "maxLength": 201,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            },
+            "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+            "provider": { "$ref": "#/$defs/slug" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "localId"],
+          "properties": {
+            "kind": { "const": "local" },
+            "localId": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        }
+      ]
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "id"],
+      "properties": {
+        "algorithm": { "enum": ["git-sha1", "git-sha256", "opaque"] },
+        "id": { "$ref": "#/$defs/boundedString128" }
+      }
+    },
+    "eventReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "id"],
+      "properties": {
+        "source": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 },
+        "id": { "$ref": "#/$defs/boundedString128" }
+      }
+    },
+    "relationships": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "causedBy": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/eventReference" }
+        },
+        "correlatedWith": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/eventReference" }
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "$ref": "#/$defs/slug" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "digest", "mediaType", "producer", "state", "disclosure"],
+      "properties": {
+        "uri": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "producer": { "$ref": "#/$defs/producer" },
+        "schema": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "state": { "enum": ["available", "verified", "unavailable", "redacted", "truncated"] },
+        "disclosure": {
+          "enum": [
+            "public-metadata",
+            "private-metadata",
+            "restricted-reference",
+            "content-excluded"
+          ]
+        }
+      }
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 24,
+      "properties": {
+        "vcs.repository.url.full": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "vcs.repository.name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "vcs.owner.name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "vcs.provider.name": { "$ref": "#/$defs/slug" },
+        "vcs.ref.head.revision": { "$ref": "#/$defs/boundedString128" },
+        "vcs.ref.head.name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "vcs.ref.head.type": { "enum": ["branch", "tag"] },
+        "vcs.change.id": { "$ref": "#/$defs/boundedString128" },
+        "vcs.change.state": { "enum": ["open", "closed", "merged"] },
+        "cicd.pipeline.name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "cicd.pipeline.action.name": { "enum": ["BUILD", "RUN", "SYNC"] }
+      }
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "adapter",
+        "repository",
+        "revision",
+        "kind",
+        "status",
+        "observedAt"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "adapter": { "$ref": "#/$defs/adapter" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "kind": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$" },
+        "status": {
+          "enum": ["started", "passed", "failed", "cancelled", "timed_out", "skipped", "unknown"]
+        },
+        "observedAt": { "type": "string", "format": "date-time", "maxLength": 100 },
+        "durationMs": { "type": "integer", "minimum": 0, "maximum": 2678400000 },
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "relationships": { "$ref": "#/$defs/relationships" },
+        "evidence": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "attributes": { "$ref": "#/$defs/attributes" },
+        "redacted": { "type": "boolean" },
+        "truncated": { "type": "boolean" }
+      }
+    }
+  }
+}
