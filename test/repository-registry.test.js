@@ -59,7 +59,7 @@ test("registry persists committed enrolment across store restarts", async () => 
     assert.equal(registry.entries[0].approval.method, "committed");
     assert.equal(registry.entries[0].enrolledAt, "2026-07-26T12:00:00.000Z");
     const raw = await readFile(path, "utf8");
-    assert.doesNotMatch(raw, /token|secret|command/u);
+    assert.doesNotMatch(raw, /\b(?:token|secret|shell|argv|environment)\b/u);
   });
 });
 
