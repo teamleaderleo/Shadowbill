@@ -5,31 +5,68 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Shadowbill</title>
     <style>
-      body { font: 14px system-ui, sans-serif; width: 290px; margin: 16px; }
-      label { display: block; margin: 12px 0 4px; }
-      input, select { box-sizing: border-box; width: 100%; padding: 7px; }
-      button { margin-top: 14px; width: 100%; padding: 8px; }
-      #status { margin-top: 10px; min-height: 18px; }
-      .row { display: flex; align-items: center; gap: 8px; }
+      :root { color-scheme: light dark; font: 14px/1.4 system-ui, sans-serif; }
+      body { box-sizing: border-box; width: 340px; margin: 0; padding: 18px; }
+      h1 { margin: 0; font-size: 18px; }
+      h2 { margin: 0 0 6px; font-size: 14px; }
+      p { margin: 6px 0; }
+      .muted { color: color-mix(in srgb, CanvasText 65%, transparent); }
+      .steps { margin: 12px 0 14px; padding-left: 22px; }
+      .steps li { margin: 4px 0; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input, select, button, .button-link { box-sizing: border-box; width: 100%; padding: 9px 10px; font: inherit; }
+      input, select { border: 1px solid color-mix(in srgb, CanvasText 28%, transparent); border-radius: 7px; background: Canvas; color: CanvasText; }
+      .row { display: flex; align-items: center; gap: 8px; font-weight: 600; }
       .row input { width: auto; }
+      .hint { display: block; margin-top: 4px; font-size: 12px; }
+      .actions { display: grid; gap: 8px; margin-top: 15px; }
+      button, .button-link { border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 7px; cursor: pointer; text-align: center; text-decoration: none; }
+      button { background: #1769e0; color: white; border-color: #1769e0; font-weight: 700; }
+      .button-link { background: Canvas; color: CanvasText; }
+      #status { min-height: 20px; margin-top: 10px; font-weight: 600; }
+      #status.success { color: #16803d; }
+      #status.error { color: #b42318; }
+      #status.pending { color: #8a5700; }
+      .health { margin-top: 14px; padding: 12px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 9px; }
+      #delivery-detail { overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
-    <strong>Shadowbill Collector</strong>
-    <label class="row"><input id="enabled" type="checkbox" /> Enabled</label>
+    <h1>Shadowbill Collector</h1>
+    <p class="muted">Connect ChatGPT capture to your local collector.</p>
+    <ol class="steps">
+      <li>Start Shadowbill with <code>npm run serve</code>.</li>
+      <li>Paste the token from <code>~/.shadowbill/collector-token</code>.</li>
+      <li>Save, test, then keep this extension enabled.</li>
+    </ol>
+
+    <label class="row"><input id="enabled" type="checkbox" /> Capture enabled</label>
     <label for="collectorUrl">Collector URL</label>
-    <input id="collectorUrl" />
+    <input id="collectorUrl" type="url" inputmode="url" autocomplete="url" spellcheck="false" />
+    <span class="hint muted">Custom hosts and ports ask for browser access when saved.</span>
     <label for="collectorToken">Collector token</label>
-    <input id="collectorToken" type="password" autocomplete="off" />
+    <input id="collectorToken" type="password" autocomplete="off" spellcheck="false" />
     <label for="model">Model</label>
-    <input id="model" />
+    <input id="model" autocomplete="off" spellcheck="false" />
     <label for="reasoningEffort">Reasoning effort</label>
     <select id="reasoningEffort">
       <option>none</option><option>low</option><option>medium</option><option>high</option>
       <option>xhigh</option><option>max</option><option>unknown</option>
     </select>
-    <button id="save">Save and test</button>
-    <div id="status"></div>
+
+    <div class="actions">
+      <button id="save" type="button">Save and test</button>
+      <a id="dashboard-link" class="button-link" target="_blank" rel="noreferrer">Open dashboard</a>
+    </div>
+    <div id="status" role="status" aria-live="polite"></div>
+
+    <section class="health" aria-labelledby="health-heading">
+      <h2 id="health-heading">Capture health</h2>
+      <p id="delivery-status">Checking recent delivery…</p>
+      <small id="delivery-detail" class="muted"></small>
+    </section>
+
+    <script src="config.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
