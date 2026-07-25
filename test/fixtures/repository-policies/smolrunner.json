@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "repository": {
+    "kind": "remote",
+    "id": "teamleaderleo/smolrunner",
+    "provider": "github"
+  },
+  "lifecycle": {
+    "state": "active",
+    "dormantAfterDays": 45
+  },
+  "signals": [
+    {
+      "kind": "verify",
+      "requirement": "required",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "domain-check",
+      "requirement": "required",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["local-command"]
+    },
+    {
+      "kind": "host-diagnostic",
+      "requirement": "optional",
+      "subject": "host",
+      "freshness": { "mode": "duration", "hours": 24 },
+      "acceptedSources": ["adapter:smolrunner"]
+    },
+    {
+      "kind": "github-ci",
+      "requirement": "optional",
+      "subject": "revision",
+      "freshness": { "mode": "revision" },
+      "acceptedSources": ["github"]
+    }
+  ],
+  "adapters": [
+    {
+      "name": "smolrunner",
+      "type": "receipt-file",
+      "path": ".proofwake/receipts/smolrunner-doctor.json",
+      "schema": "smolrunner.doctor.v1",
+      "trust": "verified-receipt"
+    }
+  ]
+}
