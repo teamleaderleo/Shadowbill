@@ -141,6 +141,8 @@ async function inspectEntry(entry, events, now) {
   let policy = normalizeRepositoryPolicy(entry.policy);
   let configuration = { ...entry.configuration };
   let adapterReadiness = {};
+  let checkoutRevision = null;
+  let checkoutBranch = null;
   if (problems.length === 0) {
     try {
       const configPath = join(entry.root, ".proofwake.json");
@@ -166,6 +168,8 @@ async function inspectEntry(entry, events, now) {
         policy = current.policy;
         configuration = current.configuration;
         adapterReadiness = current.adapterReadiness;
+        checkoutRevision = current.revision;
+        checkoutBranch = current.branch;
       } else {
         if (committedExists) {
           const error = new Error("A committed .proofwake.json now conflicts with the approved global policy; enrol again to adopt it.");
@@ -174,6 +178,12 @@ async function inspectEntry(entry, events, now) {
         }
         policy = normalizeRepositoryPolicy(entry.policy);
         adapterReadiness = await inspectAdapterPaths(entry.root, policy.adapters);
+        const current = await inspectRepositoryEnrollment(entry.root, {
+          repository: entry.repository,
+          lifecycle: policy.lifecycle,
+        });
+        checkoutRevision = current.revision;
+        checkoutBranch = current.branch;
       }
     } catch (error) {
       problems.push(asError(error));
@@ -183,7 +193,8 @@ async function inspectEntry(entry, events, now) {
   const acceptedObservations = events.map(observationFromRecord).filter(Boolean)
     .filter((observation) => observation.data?.relationships?.repository === entry.repository);
   const legacy = events.filter((event) => relevantLegacyEvent(event, entry.repository));
-  const currentRevision = latestRevision(acceptedObservations, legacy);
+  const observedRevision = latestRevision(acceptedObservations, legacy);
+  const currentRevision = checkoutRevision ?? observedRevision;
   const signals = problems.length === 0
     ? policy.expectedSignals.map((signal) => signalReport(signal, acceptedObservations, currentRevision, now))
     : [];
@@ -209,6 +220,8 @@ async function inspectEntry(entry, events, now) {
     health,
     lifecycle: policy.lifecycle,
     latestRevision: currentRevision,
+    latestRevisionSource: checkoutRevision ? "checkout" : observedRevision ? "observation" : null,
+    checkoutBranch,
     latestActivityAt,
     latestIngestedAt,
     configuration: {

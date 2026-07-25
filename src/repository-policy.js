@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseStrictJson } from "./strict-json.js";
@@ -183,76 +184,9 @@ function statChanged(before, after) {
 }
 
 export async function readRepositoryPolicyFile(path) {
-  let handle;
+  let pathMetadata;
   try {
-    handle = await open(path, "r");
+    pathMetadata = await lstat(path);
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return null;
     throw new RepositoryPolicyError(
-      "REPOSITORY_POLICY_UNAVAILABLE",
-      `Repository policy could not be opened: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  try {
-    const before = await handle.stat();
-    if (!before.isFile()) fail("REPOSITORY_POLICY_NOT_FILE", "Repository policy must be a regular file.");
-    if (before.size > REPOSITORY_POLICY_MAX_BYTES) fail("REPOSITORY_POLICY_TOO_LARGE", `Repository policy exceeds ${REPOSITORY_POLICY_MAX_BYTES} bytes.`);
-    const bytes = await handle.readFile();
-    if (bytes.length > REPOSITORY_POLICY_MAX_BYTES) fail("REPOSITORY_POLICY_TOO_LARGE", `Repository policy exceeds ${REPOSITORY_POLICY_MAX_BYTES} bytes.`);
-    let text;
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      fail("REPOSITORY_POLICY_INVALID_UTF8", "Repository policy must be valid UTF-8.");
-    }
-    const after = await handle.stat();
-    if (statChanged(before, after)) fail("REPOSITORY_POLICY_CHANGED", "Repository policy changed while it was being read.");
-    return parseRepositoryPolicyJson(text);
-  } finally {
-    await handle.close();
-  }
-}
-
-function within(root, target) {
-  const rel = relative(root, target);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-export async function inspectAdapterPaths(rootPath, adapters) {
-  const root = await realpath(rootPath);
-  const results = {};
-  for (const [name, adapterPath] of Object.entries(adapters)) {
-    const segments = validatePortableAdapterPath(adapterPath, `$.adapters.${name}`);
-    let current = root;
-    let exists = true;
-    let escaped = false;
-    for (let index = 0; index < segments.length; index += 1) {
-      const candidate = join(current, segments[index]);
-      try {
-        const metadata = await lstat(candidate);
-        if (metadata.isSymbolicLink()) {
-          const resolved = await realpath(candidate);
-          if (!within(root, resolved)) {
-            escaped = true;
-            break;
-          }
-          current = resolved;
-        } else {
-          current = candidate;
-        }
-      } catch (error) {
-        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-          exists = false;
-          current = resolve(current, ...segments.slice(index));
-          break;
-        }
-        throw error;
-      }
-    }
-    if (escaped || !within(root, current)) {
-      fail("REPOSITORY_ADAPTER_PATH_ESCAPE", `Adapter path escapes the repository root: ${adapterPath}.`, `$.adapters.${name}`);
-    }
-    results[name] = { path: adapterPath, exists };
-  }
-  return results;
-}

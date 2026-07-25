@@ -83,6 +83,9 @@ test("reports unobserved then active green repository", async () => {
     const empty = await buildRepositoryInventory({ registryStore, eventStore, now: new Date("2026-07-26T11:00:00.000Z") });
     assert.equal(empty.repositories[0].classification, "unobserved");
     assert.equal(empty.repositories[0].health, "yellow");
+    assert.equal(empty.repositories[0].latestRevision, revision);
+    assert.equal(empty.repositories[0].latestRevisionSource, "checkout");
+    assert.equal(empty.repositories[0].checkoutBranch, "main");
     assert.equal(empty.repositories[0].signals[0].state, "missing");
 
     await new ObservationLedger(eventStore).append(verifyObservation("example/project", revision));
@@ -91,6 +94,30 @@ test("reports unobserved then active green repository", async () => {
     assert.equal(active.repositories[0].health, "green");
     assert.equal(active.repositories[0].latestRevision, revision);
     assert.equal(active.repositories[0].signals[0].state, "passed");
+  });
+});
+
+
+test("checkout revision supersedes older revision evidence", async () => {
+  await temporaryDirectory(async (directory) => {
+    const root = join(directory, "repo");
+    const firstRevision = await createRepository(root);
+    const proposal = await inspectRepositoryEnrollment(root);
+    const registryStore = new RepositoryRegistryStore(join(directory, "repositories.json"));
+    const eventStore = new JsonlEventStore(join(directory, "events.jsonl"));
+    await registryStore.enroll(proposal);
+    await new ObservationLedger(eventStore).append(verifyObservation("example/project", firstRevision));
+
+    await writeFile(join(root, "next.txt"), "next\n");
+    await git(root, "add", "next.txt");
+    await git(root, "commit", "-m", "next");
+    const secondRevision = await git(root, "rev-parse", "HEAD");
+
+    const report = await buildRepositoryInventory({ registryStore, eventStore, now: new Date("2026-07-26T11:00:00.000Z") });
+    assert.equal(report.repositories[0].latestRevision, secondRevision);
+    assert.equal(report.repositories[0].latestRevisionSource, "checkout");
+    assert.equal(report.repositories[0].signals[0].state, "missing");
+    assert.equal(report.repositories[0].health, "yellow");
   });
 });
 
