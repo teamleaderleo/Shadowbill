@@ -11,6 +11,17 @@ concurrency:
 
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: policy-core
+            command: node --test test/repository-policy.test.js
+          - name: policy-applicability
+            command: node --test test/repository-policy-applicability.test.js
+          - name: full-suite
+            command: npm test
+    name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,4 +29,4 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm test
+      - run: ${{ matrix.command }}
