@@ -44,6 +44,13 @@ function sourceUnavailable() {
   );
 }
 
+function sourceNotFile() {
+  return new ObservationSourceError(
+    "OBSERVATION_SOURCE_NOT_FILE",
+    "Observation input must be a regular file.",
+  );
+}
+
 export async function readBoundedObservationFile(path) {
   let pathMetadata;
   try {
@@ -57,6 +64,7 @@ export async function readBoundedObservationFile(path) {
       "Observation input must not be a symbolic link.",
     );
   }
+  if (!pathMetadata.isFile()) throw sourceNotFile();
 
   const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
   let handle;
@@ -74,9 +82,7 @@ export async function readBoundedObservationFile(path) {
 
   try {
     const before = await handle.stat();
-    if (!before.isFile()) {
-      throw new ObservationSourceError("OBSERVATION_SOURCE_NOT_FILE", "Observation input must be a regular file.");
-    }
+    if (!before.isFile()) throw sourceNotFile();
     if (before.dev !== pathMetadata.dev || before.ino !== pathMetadata.ino) {
       throw new ObservationSourceError("OBSERVATION_SOURCE_CHANGED", "Observation file changed before it could be read.");
     }
