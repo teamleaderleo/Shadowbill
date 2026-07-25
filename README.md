@@ -18,14 +18,15 @@ Proofwake observes and indexes. It does not schedule CI, operate runners, deploy
 
 The repository was originally named **Shadowbill** and currently contains a working AI-usage reckoner, Git and GitHub observation collectors, a durable local ledger, reports, a dashboard, diagnostics, and a read-only MCP server.
 
-The broader Proofwake direction is now documented, while the implementation still exposes compatibility names such as:
+Proofwake is now the primary product and command identity. Compatibility remains for:
 
-- the `shadowbill` CLI;
+- the `shadowbill` binary alias;
 - `SHADOWBILL_*` environment variables;
-- `~/.shadowbill` data paths;
-- Shadowbill MCP tool names and extension branding.
+- existing `~/.shadowbill` ledgers and collector-token files;
+- historical event schemas and MCP tool names;
+- legacy browser-extension storage keys.
 
-Those names will migrate through explicit aliases and data-compatibility work. Existing ledgers and installations should remain usable throughout the transition.
+Clean installations use `~/.proofwake`. An existing `~/.shadowbill/events.jsonl` remains active until an explicit migration is performed. If both implicit ledgers exist, Proofwake refuses to choose or merge them. Run `proofwake status` to inspect the active identity and paths.
 
 ## Read this first
 
@@ -33,6 +34,7 @@ Those names will migrate through explicit aliases and data-compatibility work. E
 - [Architecture](docs/architecture.md) — event, evidence, privacy, trust, projection, and integration boundaries
 - [Roadmap](docs/roadmap.md) — the implementation sequence from the current Shadowbill codebase
 - [Ecosystem decisions](docs/ecosystem.md) — what existing standards and products already provide, and why Proofwake remains independent
+- [Naming migration](docs/naming-migration.md) — current aliases, precedence, storage selection, and migration safety
 
 ## Intended composition
 
@@ -62,18 +64,37 @@ Current measurements include:
 - cost per commit, merged PR, successful CI run, deployment, and retained code token;
 - heuristic repository allocation with explicit unallocated cost and coverage.
 
-These are versioned estimates, not claims about inaccessible provider internals or provider cost. The module will remain optional as Proofwake develops its broader revision-evidence model.
+These are versioned estimates, not claims about inaccessible provider internals or provider cost. The module remains optional as Proofwake develops its broader revision-evidence model.
 
-## Start the current collector
+## Install and inspect identity
 
 Requires Node.js 22 or newer.
 
 ```bash
 npm install
+node src/cli.js status
+node src/cli.js status --json
+```
+
+The package exposes both `proofwake` and the compatibility alias `shadowbill` when installed as a command.
+
+Storage selection is read-only and deterministic:
+
+1. `--data` wins;
+2. `PROOFWAKE_DATA` wins over `SHADOWBILL_DATA`;
+3. an existing `~/.proofwake/events.jsonl` is selected;
+4. otherwise an existing `~/.shadowbill/events.jsonl` is selected with a compatibility warning;
+5. otherwise a clean installation uses `~/.proofwake/events.jsonl`.
+
+Proofwake never silently combines the new and legacy ledgers.
+
+## Start the current collector
+
+```bash
 npm run serve
 ```
 
-The collector listens on `http://127.0.0.1:7337` and currently writes to `~/.shadowbill/events.jsonl`. On first launch, it creates a browser collector token at `~/.shadowbill/collector-token` with owner-only permissions where supported.
+The collector listens on `http://127.0.0.1:7337`. A clean installation writes to `~/.proofwake/events.jsonl` and creates `~/.proofwake/collector-token` with owner-only permissions where supported. Existing Shadowbill installations keep using their legacy paths until explicitly migrated.
 
 Load the unpacked extension from [`extension/`](extension/), open its popup, and paste the collector token.
 
@@ -97,9 +118,11 @@ node src/cli.js report --days 30 --json
 Set a reporting timezone explicitly when running on a server or inside a container:
 
 ```bash
-SHADOWBILL_TIMEZONE=America/Los_Angeles npm run serve
+PROOFWAKE_TIMEZONE=America/Los_Angeles npm run serve
 node src/cli.js report --timezone America/Los_Angeles
 ```
+
+`SHADOWBILL_TIMEZONE` remains a compatibility alias. Proofwake variables win when both names are present, and warnings are written to stderr so JSON stdout remains parseable.
 
 Repository allocation currently uses the versioned basis `same-day-added-code-tokens`. Days without retained-code evidence remain visibly unallocated. This is a correlated heuristic rather than causal attribution. See [repository allocation](docs/repository-allocation.md).
 
@@ -111,7 +134,7 @@ With the collector running, open:
 http://127.0.0.1:7337/dashboard
 ```
 
-The current dashboard includes rolling ranges, cost and activity summaries, daily detail, repository allocation, coverage, and delivery outcomes. Its next major change is a fleet-first view built around repository inventory, revision evidence, source freshness, failure, recovery, and missing expected signals.
+The current dashboard is the optional Shadowbill estimate view inside Proofwake. It includes rolling ranges, cost and activity summaries, daily detail, repository allocation, coverage, and delivery outcomes. Its next major change is a fleet-first view built around repository inventory, revision evidence, source freshness, failure, recovery, and missing expected signals.
 
 Assets and report calls stay on the collector origin. The page uses a strict Content Security Policy and makes no third-party requests.
 
@@ -130,23 +153,21 @@ See [doctor](docs/doctor.md).
 
 ## Browser collector authentication
 
-Browser-originated event writes require bearer authentication.
-
-```bash
-cat ~/.shadowbill/collector-token
-```
+Browser-originated event writes require bearer authentication. Use `proofwake status` to find the active token path, then read that file locally.
 
 Choose a custom token file:
 
 ```bash
-node src/cli.js serve --collector-token-file /private/path/shadowbill-token
+node src/cli.js serve --collector-token-file /private/path/proofwake-token
 ```
 
 Or provide a direct value containing at least 32 characters:
 
 ```bash
-SHADOWBILL_COLLECTOR_TOKEN='replace-with-a-long-random-value' npm run serve
+PROOFWAKE_COLLECTOR_TOKEN='replace-with-a-long-random-value' npm run serve
 ```
+
+`SHADOWBILL_COLLECTOR_TOKEN` and `SHADOWBILL_COLLECTOR_TOKEN_FILE` remain compatibility aliases.
 
 The event endpoint accepts aggregate chat events only and copies an allowlist of fields before persistence. Undeclared values such as prompt text are discarded.
 
@@ -166,7 +187,7 @@ The current implementation exposes the local ledger through a zero-dependency MC
 npm run mcp
 ```
 
-The report tools are read-only. Aggregate chat writes require explicit opt-in and reject undeclared fields, including prompt and response text.
+The existing `shadowbill_*` MCP tools remain compatibility interfaces. The report tools are read-only. Aggregate chat writes require explicit opt-in and reject undeclared fields, including prompt and response text.
 
 Proofwake’s planned MCP surface will remain read-only by default and add fleet, repository, revision-evidence, failure, and recovery reports.
 
@@ -175,8 +196,10 @@ Proofwake’s planned MCP surface will remain read-only by default and add fleet
 Start the collector with a webhook secret:
 
 ```bash
-SHADOWBILL_GITHUB_WEBHOOK_SECRET='replace-me' npm run serve
+PROOFWAKE_GITHUB_WEBHOOK_SECRET='replace-me' npm run serve
 ```
+
+`SHADOWBILL_GITHUB_WEBHOOK_SECRET` remains a compatibility alias.
 
 Configure a GitHub App or repository webhook for pushes, pull requests, workflow runs, and deployment statuses. The collector verifies `X-Hub-Signature-256` before parsing or storing a delivery. GitHub delivery IDs provide idempotency. Source patches, PR descriptions, comments, logs, and deployment URLs are excluded.
 
