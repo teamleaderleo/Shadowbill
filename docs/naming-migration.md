@@ -37,7 +37,7 @@ Rules:
 2. A `PROOFWAKE_*` value wins over its `SHADOWBILL_*` alias.
 3. When both environment names are present, Proofwake reports that the legacy value was ignored.
 4. When only a legacy name is present, it remains active and produces a bounded compatibility warning.
-5. Warnings go to stderr so JSON and MCP stdout remain parseable.
+5. Operational-command warnings go to stderr so JSON and MCP stdout remain parseable. `proofwake status --json` returns its warnings as structured JSON and writes no warning text to stderr.
 6. Secret values are never included in status output or warnings.
 
 ## Storage selection
