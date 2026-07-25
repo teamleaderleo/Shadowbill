@@ -8,6 +8,7 @@ const MAX_ARRAY_LENGTH = 32;
 const MAX_EVIDENCE_REFERENCES = 16;
 const MAX_RELATIONSHIPS = 16;
 const MAX_DURATION_MS = 31 * 24 * 60 * 60 * 1000;
+const RFC3339_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 const TOP_LEVEL_FIELDS = new Set(["specversion", "id", "source", "type", "time", "subject", "datacontenttype", "dataschema", "data"]);
 const DATA_FIELDS = new Set(["schemaVersion", "adapter", "repository", "revision", "kind", "status", "observedAt", "durationMs", "attempt", "sequence", "relationships", "evidence", "attributes", "redacted", "truncated"]);
 const TRUST_CLASSES = new Set(["local-operator", "signed-provider", "verified-receipt", "authenticated-client", "untrusted-observation"]);
@@ -67,12 +68,13 @@ function optionalBoolean(value, label) {
 
 function isoTime(value, label) {
   requiredString(value, label, 100);
+  if (!RFC3339_DATE_TIME.test(value)) fail("PW_SCHEMA_INVALID", `${label} must be an RFC 3339 date-time with a timezone`);
   const milliseconds = Date.parse(value);
-  if (Number.isNaN(milliseconds)) fail("PW_SCHEMA_INVALID", `${label} must be an ISO-8601 timestamp`);
+  if (Number.isNaN(milliseconds)) fail("PW_SCHEMA_INVALID", `${label} must be a real RFC 3339 date-time`);
   return new Date(milliseconds).toISOString();
 }
 
-function absoluteUri(value, label, protocols = null) {
+function absoluteUri(value, label, protocols = null, normalize = true) {
   requiredString(value, label, 2_048);
   let parsed;
   try {
@@ -81,7 +83,10 @@ function absoluteUri(value, label, protocols = null) {
     fail("PW_SCHEMA_INVALID", `${label} must be an absolute URI`);
   }
   if (protocols && !protocols.has(parsed.protocol)) fail("PW_SCHEMA_INVALID", `${label} uses an unsupported URI scheme`);
-  return parsed.href;
+  if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (parsed.username || parsed.password)) {
+    fail("PW_SCHEMA_INVALID", `${label} must not contain credentials`);
+  }
+  return normalize ? parsed.href : value;
 }
 
 function slug(value, label, maximum = 100) {
@@ -236,6 +241,7 @@ function normalizeRepository(value) {
   exactFields(value, new Set(["kind", "id", "url", "provider", "localId"]), "data.repository");
   const kind = requiredString(value.kind, "data.repository.kind", 16);
   if (kind === "remote") {
+    if (value.localId !== undefined) fail("PW_SCHEMA_INVALID", "remote repositories must not include localId");
     const id = requiredString(value.id, "data.repository.id", 255).toLowerCase();
     if (!/^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u.test(id)) {
       fail("PW_SCHEMA_INVALID", "data.repository.id must use canonical owner/name form");
@@ -248,6 +254,9 @@ function normalizeRepository(value) {
     };
   }
   if (kind === "local") {
+    if (value.id !== undefined || value.url !== undefined || value.provider !== undefined) {
+      fail("PW_SCHEMA_INVALID", "local repositories must not include remote repository fields");
+    }
     requiredString(value.localId, "data.repository.localId", 71);
     if (!/^sha256:[0-9a-f]{64}$/u.test(value.localId)) fail("PW_SCHEMA_INVALID", "data.repository.localId must be a sha256 digest");
     return { kind, localId: value.localId };
@@ -278,7 +287,7 @@ function normalizeRelationships(value) {
       if (!isPlainObject(reference)) fail("PW_SCHEMA_INVALID", `${label}[${index_}] must be an object`);
       exactFields(reference, new Set(["source", "id"]), `${label}[${index_}]`);
       const normalized = {
-        source: absoluteUri(reference.source, `${label}[${index_}].source`),
+        source: absoluteUri(reference.source, `${label}[${index_}].source`, null, false),
         id: requiredString(reference.id, `${label}[${index_}].id`, 128),
       };
       const key = `${normalized.source}\0${normalized.id}`;
@@ -312,7 +321,7 @@ function normalizeEvidence(value) {
       uri: absoluteUri(reference.uri, `${label}.uri`),
       digest,
       ...(reference.sizeBytes === undefined ? {} : { sizeBytes: boundedInteger(reference.sizeBytes, `${label}.sizeBytes`, 0, Number.MAX_SAFE_INTEGER) }),
-      mediaType: requiredString(reference.mediaType, `${label}.mediaType`, 255).toLowerCase(),
+      mediaType: requiredString(reference.mediaType, `${label}.mediaType`, 255),
       producer: {
         name: slug(reference.producer.name, `${label}.producer.name`),
         version: requiredString(reference.producer.version, `${label}.producer.version`, 100),
@@ -355,8 +364,8 @@ export function normalizeObservation(value) {
   }
   if (value.specversion !== "1.0") fail("PW_SCHEMA_INVALID", "specversion must be 1.0");
   const id = requiredString(value.id, "id", 128);
-  const source = absoluteUri(value.source, "source");
-  const type = slug(value.type, "type", 255).toLowerCase();
+  const source = absoluteUri(value.source, "source", null, false);
+  const type = slug(value.type, "type", 255);
   const time = isoTime(value.time, "time");
   const subject = requiredString(value.subject, "subject", 512);
   if (value.datacontenttype !== "application/json") fail("PW_SCHEMA_INVALID", "datacontenttype must be application/json");
