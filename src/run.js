@@ -26,6 +26,8 @@ const SIGNAL_KINDS = new Set([
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const COMMAND_MAX_ARGUMENTS = 256;
+const COMMAND_MAX_ARGUMENT_LENGTH = 32_768;
 
 export class LocalCommandError extends Error {
   constructor(code, message, path = "$") {
@@ -69,19 +71,19 @@ function inside(root, candidate) {
   return value === "" || (!value.startsWith("..") && !isAbsolute(value));
 }
 
-function canonicalTimestamp(value) {
+function timestamp(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) fail("PROOFWAKE_RUN_INVALID_CLOCK", "Clock returned an invalid timestamp.");
   return date;
 }
 
-function atLeast(value, minimum) {
+function noEarlierThan(value, minimum) {
   return value.getTime() < minimum.getTime() ? new Date(minimum) : value;
 }
 
-function streamCounter(destination, limit, onLimit) {
+function outputCounter(destination, onLimit) {
   let bytes = 0;
-  let lines = 0;
+  let newlines = 0;
   let lastByte = null;
   let forwarded = 0;
   let limited = false;
@@ -90,16 +92,16 @@ function streamCounter(destination, limit, onLimit) {
     write(chunk) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += buffer.length;
-      for (const byte of buffer) if (byte === 10) lines += 1;
+      for (const byte of buffer) if (byte === 10) newlines += 1;
       if (buffer.length > 0) lastByte = buffer.at(-1);
 
-      const remaining = Math.max(0, limit - forwarded);
+      const remaining = Math.max(0, COMMAND_OUTPUT_LIMIT_BYTES - forwarded);
       if (remaining > 0) {
         const visible = buffer.subarray(0, remaining);
         destination.write(visible);
         forwarded += visible.length;
       }
-      if (!limited && bytes > limit) {
+      if (!limited && bytes > COMMAND_OUTPUT_LIMIT_BYTES) {
         limited = true;
         onLimit();
       }
@@ -107,7 +109,7 @@ function streamCounter(destination, limit, onLimit) {
     snapshot() {
       return {
         bytes,
-        lines: lines + (bytes > 0 && lastByte !== 10 ? 1 : 0),
+        lines: newlines + (bytes > 0 && lastByte !== 10 ? 1 : 0),
         limited,
       };
     },
@@ -129,20 +131,25 @@ async function inspectCheckout(cwd, repository) {
   const root = await realpath(await git(workingDirectory, ["rev-parse", "--show-toplevel"]));
   if (!inside(root, workingDirectory)) fail("PROOFWAKE_RUN_CWD_ESCAPE", "Working directory is outside the Git root.", "$.cwd");
 
-  const [revision, branch, dirty, remoteNames] = await Promise.all([
+  const [revision, branch, dirty, remoteOutput] = await Promise.all([
     git(root, ["rev-parse", "--verify", "HEAD"]),
     git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], { allowFailure: true }),
-    git(root, ["status", "--porcelain=v1", "--untracked-files=normal"], { allowFailure: true }),
+    git(root, ["status", "--porcelain=v1", "--untracked-files=normal"]),
     git(root, ["remote"], { allowFailure: true }),
   ]);
 
+  const remoteNames = remoteOutput.split("\n").filter(Boolean);
   const remoteRepositories = [];
-  for (const name of remoteNames.split("\n").filter(Boolean)) {
+  for (const name of remoteNames) {
     const url = await git(root, ["remote", "get-url", name], { allowFailure: true });
     const identity = repositoryIdentifier(url, "");
     if (REPOSITORY.test(identity)) remoteRepositories.push(identity.toLowerCase());
   }
+
   const normalizedRepository = repository.toLowerCase();
+  if (remoteNames.length > 0 && remoteRepositories.length === 0) {
+    fail("PROOFWAKE_RUN_REMOTE_UNVERIFIED", "Git remotes exist, but none has a canonical repository identity.", "$.repository");
+  }
   if (remoteRepositories.length > 0 && !remoteRepositories.includes(normalizedRepository)) {
     fail("PROOFWAKE_RUN_REPOSITORY_MISMATCH", "--repo does not match a canonical Git remote.", "$.repository");
   }
@@ -150,7 +157,6 @@ async function inspectCheckout(cwd, repository) {
   return {
     repository: normalizedRepository,
     workingDirectory,
-    root,
     revision,
     branch: branch || null,
     dirty: dirty.length > 0,
@@ -159,65 +165,66 @@ async function inspectCheckout(cwd, repository) {
   };
 }
 
-function outcomeFor({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult }) {
+function classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, dirty }) {
   if (spawnError) return { failureCode: "spawn-failed", status: "unavailable", cliExitCode: 127 };
   if (timedOut) return { failureCode: "timeout", status: "failed", cliExitCode: 124 };
   if (outputLimited) return { failureCode: "output-limit", status: "failed", cliExitCode: 125 };
   if (cancellationSignal) return { failureCode: "cancelled", status: "cancelled", cliExitCode: signalExitCode(cancellationSignal) };
   if (closeResult.signal) return { failureCode: "signalled", status: "failed", cliExitCode: signalExitCode(closeResult.signal) };
   if (closeResult.code !== 0) return { failureCode: "exit-nonzero", status: "failed", cliExitCode: closeResult.code ?? 1 };
+  if (dirty) return { failureCode: null, status: "warning", cliExitCode: 0 };
   return { failureCode: null, status: "passed", cliExitCode: 0 };
-}
-
-function fact(name, value) {
-  return { name, value };
-}
-
-function commandFacts(result) {
-  const facts = [
-    fact("proofwake.command.outcome", result.failureCode ?? "passed"),
-    fact("proofwake.command.executable-sha256", result.executableDigest),
-    fact("proofwake.command.argv-sha256", result.argvDigest),
-    fact("proofwake.command.working-directory-sha256", result.workingDirectoryDigest),
-    fact("proofwake.command.argument-count", result.argumentCount),
-    fact("proofwake.command.stdout-bytes", result.stdout.bytes),
-    fact("proofwake.command.stderr-bytes", result.stderr.bytes),
-    fact("proofwake.command.stdout-lines", result.stdout.lines),
-    fact("proofwake.command.stderr-lines", result.stderr.lines),
-    fact("proofwake.command.output-limit-bytes", COMMAND_OUTPUT_LIMIT_BYTES),
-    fact("proofwake.command.timeout-ms", result.timeoutMs),
-    fact("proofwake.command.timed-out", result.timedOut),
-    fact("proofwake.command.cancelled", result.cancelled),
-    fact("proofwake.command.output-limited", result.outputLimited),
-    fact("proofwake.command.arguments-retained", false),
-    fact("proofwake.command.environment-retained", false),
-    fact("proofwake.command.stdout-retained", false),
-    fact("proofwake.command.stderr-retained", false),
-    fact("proofwake.command.dirty-worktree", result.dirty),
-    fact("proofwake.command.detached-head", result.detached),
-    fact("proofwake.command.repository-binding", result.binding),
-  ];
-  if (result.exitCode !== null) facts.push(fact("proofwake.command.exit-code", result.exitCode));
-  if (result.signal !== null) facts.push(fact("proofwake.command.signal", result.signal));
-  if (SAFE_TOKEN.test(result.executable)) facts.push(fact("proofwake.command.executable", result.executable));
-  return facts;
-}
-
-function omittedFor(result) {
-  const omitted = [];
-  if (result.stdout.limited) omitted.push("proofwake.command.truncated.stdout");
-  if (result.stderr.limited) omitted.push("proofwake.command.truncated.stderr");
-  return omitted;
 }
 
 function factsMap(observation) {
   return new Map((observation.data?.facts ?? []).map((entry) => [entry.name, entry.value]));
 }
 
-function resultFromExisting(record) {
+function commandFacts(result) {
+  const outcome = result.failureCode ?? (result.dirty ? "passed-dirty" : "passed");
+  const facts = [
+    { name: "proofwake.command.outcome", value: outcome },
+    { name: "proofwake.command.executable-sha256", value: result.executableDigest },
+    { name: "proofwake.command.argv-sha256", value: result.argvDigest },
+    { name: "proofwake.command.working-directory-sha256", value: result.workingDirectoryDigest },
+    { name: "proofwake.command.argument-count", value: result.argumentCount },
+    { name: "proofwake.command.stdout-bytes", value: result.stdout.bytes },
+    { name: "proofwake.command.stderr-bytes", value: result.stderr.bytes },
+    { name: "proofwake.command.stdout-lines", value: result.stdout.lines },
+    { name: "proofwake.command.stderr-lines", value: result.stderr.lines },
+    { name: "proofwake.command.stdout-limited", value: result.stdout.limited },
+    { name: "proofwake.command.stderr-limited", value: result.stderr.limited },
+    { name: "proofwake.command.output-limit-bytes", value: COMMAND_OUTPUT_LIMIT_BYTES },
+    { name: "proofwake.command.timeout-ms", value: result.timeoutMs },
+    { name: "proofwake.command.timed-out", value: result.timedOut },
+    { name: "proofwake.command.cancelled", value: result.cancelled },
+    { name: "proofwake.command.output-limited", value: result.outputLimited },
+    { name: "proofwake.command.arguments-retained", value: false },
+    { name: "proofwake.command.environment-retained", value: false },
+    { name: "proofwake.command.stdout-retained", value: false },
+    { name: "proofwake.command.stderr-retained", value: false },
+    { name: "proofwake.command.dirty-worktree", value: result.dirty },
+    { name: "proofwake.command.detached-head", value: result.detached },
+    { name: "proofwake.command.repository-binding", value: result.binding },
+  ];
+  if (result.exitCode !== null) facts.push({ name: "proofwake.command.exit-code", value: result.exitCode });
+  if (result.signal !== null) facts.push({ name: "proofwake.command.signal", value: result.signal });
+  if (SAFE_TOKEN.test(result.executable)) facts.push({ name: "proofwake.command.executable", value: result.executable });
+  return facts;
+}
+
+function truncatedFields(result) {
+  const omitted = [];
+  if (result.stdout.limited) omitted.push("proofwake.command.truncated.stdout");
+  if (result.stderr.limited) omitted.push("proofwake.command.truncated.stderr");
+  return omitted;
+}
+
+function existingResult(record) {
   const observation = record.observation;
   const facts = factsMap(observation);
-  const failureCode = observation.data.status === "passed" ? null : facts.get("proofwake.command.outcome") ?? "unknown";
+  const outcome = facts.get("proofwake.command.outcome") ?? "unknown";
+  const failureCode = outcome === "passed" || outcome === "passed-dirty" ? null : outcome;
   const signal = facts.get("proofwake.command.signal") ?? null;
   const exitCode = facts.has("proofwake.command.exit-code") ? facts.get("proofwake.command.exit-code") : null;
   let cliExitCode = 0;
@@ -226,6 +233,7 @@ function resultFromExisting(record) {
   else if (failureCode === "output-limit") cliExitCode = 125;
   else if (failureCode === "cancelled" || failureCode === "signalled") cliExitCode = signalExitCode(signal);
   else if (failureCode === "exit-nonzero") cliExitCode = exitCode ?? 1;
+
   return {
     runId: observation.data.relationships.run,
     repository: observation.data.relationships.repository,
@@ -240,16 +248,20 @@ function resultFromExisting(record) {
     stdout: {
       bytes: facts.get("proofwake.command.stdout-bytes") ?? 0,
       lines: facts.get("proofwake.command.stdout-lines") ?? 0,
-      limited: facts.get("proofwake.command.output-limited") ?? false,
+      limited: facts.get("proofwake.command.stdout-limited") ?? false,
     },
     stderr: {
       bytes: facts.get("proofwake.command.stderr-bytes") ?? 0,
       lines: facts.get("proofwake.command.stderr-lines") ?? 0,
-      limited: facts.get("proofwake.command.output-limited") ?? false,
+      limited: facts.get("proofwake.command.stderr-limited") ?? false,
     },
+    timeoutMs: facts.get("proofwake.command.timeout-ms") ?? 0,
     timedOut: facts.get("proofwake.command.timed-out") ?? false,
     cancelled: facts.get("proofwake.command.cancelled") ?? false,
     outputLimited: facts.get("proofwake.command.output-limited") ?? false,
+    dirty: facts.get("proofwake.command.dirty-worktree") ?? false,
+    detached: facts.get("proofwake.command.detached-head") ?? false,
+    binding: facts.get("proofwake.command.repository-binding") ?? "unknown",
     observation,
     fingerprint: record.requestFingerprint,
     storageStatus: "duplicate",
@@ -257,13 +269,14 @@ function resultFromExisting(record) {
   };
 }
 
-async function existingRun(store, runId, expected) {
+async function findReplay(store, runId, expected) {
   const id = `local-command.${runId}`;
   const record = (await store.readAll()).find((event) =>
     event?.type === "proofwake_observation" &&
     event.observationIdentity?.source === "urn:proofwake:adapter:local-command" &&
     event.observationIdentity?.id === id);
   if (!record) return null;
+
   const observation = record.observation;
   const facts = factsMap(observation);
   const matches = observation.data.kind === expected.kind &&
@@ -271,9 +284,23 @@ async function existingRun(store, runId, expected) {
     observation.data.relationships?.revision === expected.revision &&
     observation.data.relationships?.run === runId &&
     facts.get("proofwake.command.argv-sha256") === expected.argvDigest &&
-    facts.get("proofwake.command.working-directory-sha256") === expected.workingDirectoryDigest;
+    facts.get("proofwake.command.working-directory-sha256") === expected.workingDirectoryDigest &&
+    facts.get("proofwake.command.timeout-ms") === expected.timeoutMs;
   if (!matches) fail("PROOFWAKE_RUN_ID_CONFLICT", "Run ID already belongs to a different command receipt.", "$.runId");
-  return resultFromExisting(record);
+  if (expected.dirty || facts.get("proofwake.command.dirty-worktree") === true) {
+    fail("PROOFWAKE_RUN_REPLAY_DIRTY", "Run IDs cannot replay evidence from a dirty worktree.", "$.runId");
+  }
+  return existingResult(record);
+}
+
+function validateCommand(command) {
+  if (!Array.isArray(command) || command.length === 0 || command.length > COMMAND_MAX_ARGUMENTS) {
+    fail("PROOFWAKE_RUN_INVALID_COMMAND", `Command must contain 1..${COMMAND_MAX_ARGUMENTS} arguments.`, "$.command");
+  }
+  if (command.some((value) => typeof value !== "string" || value.length > COMMAND_MAX_ARGUMENT_LENGTH)) {
+    fail("PROOFWAKE_RUN_INVALID_COMMAND", "Command arguments must be bounded strings.", "$.command");
+  }
+  if (command[0].length === 0) fail("PROOFWAKE_RUN_INVALID_COMMAND", "Command executable must not be empty.", "$.command[0]");
 }
 
 export async function executeLocalCommand({
@@ -291,28 +318,29 @@ export async function executeLocalCommand({
   if (typeof repository !== "string" || !REPOSITORY.test(repository)) fail("PROOFWAKE_RUN_INVALID_REPOSITORY", "--repo must use owner/name form.", "$.repository");
   if (!SIGNAL_KINDS.has(kind)) fail("PROOFWAKE_RUN_INVALID_KIND", `Unsupported signal kind: ${kind}.`, "$.kind");
   if (!RUN_ID.test(runId)) fail("PROOFWAKE_RUN_INVALID_ID", "Run ID must be a bounded token.", "$.runId");
-  if (!Array.isArray(command) || command.length === 0 || command.some((value) => typeof value !== "string" || value.length === 0)) {
-    fail("PROOFWAKE_RUN_INVALID_COMMAND", "A non-empty command argument vector is required.", "$.command");
-  }
+  validateCommand(command);
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > COMMAND_TIMEOUT_MAX_MS) {
     fail("PROOFWAKE_RUN_INVALID_TIMEOUT", "Timeout must be between 0 and 86400000 milliseconds.", "$.timeoutMs");
   }
+  if (outputMode !== "human" && outputMode !== "json") fail("PROOFWAKE_RUN_INVALID_OUTPUT", "Output mode must be human or json.", "$.outputMode");
   if (!store || typeof store.readAll !== "function") fail("PROOFWAKE_RUN_INVALID_STORE", "A readable event store is required.");
 
   const checkout = await inspectCheckout(cwd, repository);
   const argvDigest = sha256(JSON.stringify(command));
   const workingDirectoryDigest = sha256(checkout.workingDirectory);
   const executableDigest = sha256(command[0]);
-  const replay = await existingRun(store, runId, {
+  const replay = await findReplay(store, runId, {
     kind,
     repository: checkout.repository,
     revision: checkout.revision,
     argvDigest,
     workingDirectoryDigest,
+    timeoutMs,
+    dirty: checkout.dirty,
   });
   if (replay) return replay;
 
-  const started = canonicalTimestamp(now());
+  const started = timestamp(now());
   const startedMonotonic = process.hrtime.bigint();
   let child;
   let timeout;
@@ -322,8 +350,6 @@ export async function executeLocalCommand({
   let outputLimited = false;
   let spawnError = null;
   let completed = false;
-  const stdoutDestination = outputMode === "json" ? process.stderr : process.stdout;
-  const stderrDestination = process.stderr;
 
   const terminate = (reason, signal = "SIGTERM") => {
     if (completed || !child) return;
@@ -337,8 +363,8 @@ export async function executeLocalCommand({
     killTimer.unref?.();
   };
 
-  const stdout = streamCounter(stdoutDestination, COMMAND_OUTPUT_LIMIT_BYTES, () => terminate("output"));
-  const stderr = streamCounter(stderrDestination, COMMAND_OUTPUT_LIMIT_BYTES, () => terminate("output"));
+  const stdout = outputCounter(outputMode === "json" ? process.stderr : process.stdout, () => terminate("output"));
+  const stderr = outputCounter(process.stderr, () => terminate("output"));
   const onSigint = () => {
     cancellationSignal = "SIGINT";
     terminate("cancel", "SIGINT");
@@ -392,17 +418,17 @@ export async function executeLocalCommand({
     process.removeListener("SIGTERM", onSigterm);
   }
 
-  const elapsedMs = Number((process.hrtime.bigint() - startedMonotonic) / 1_000_000n);
-  const finished = atLeast(canonicalTimestamp(now()), started);
-  const ingested = atLeast(canonicalTimestamp(now()), finished);
-  const outcome = outcomeFor({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult });
+  const durationMs = Number((process.hrtime.bigint() - startedMonotonic) / 1_000_000n);
+  const finished = noEarlierThan(timestamp(now()), started);
+  const ingested = noEarlierThan(timestamp(now()), finished);
+  const outcome = classifyOutcome({ spawnError, timedOut, outputLimited, cancellationSignal, closeResult, dirty: checkout.dirty });
   const result = {
     runId,
     repository: checkout.repository,
     revision: checkout.revision,
     startedAt: started.toISOString(),
     finishedAt: finished.toISOString(),
-    durationMs: Math.max(0, elapsedMs),
+    durationMs: Math.max(0, durationMs),
     exitCode: closeResult.code,
     signal: closeResult.signal ?? cancellationSignal,
     failureCode: outcome.failureCode,
@@ -422,7 +448,8 @@ export async function executeLocalCommand({
     detached: checkout.detached,
     binding: checkout.binding,
   };
-  const omitted = omittedFor(result);
+
+  const omitted = truncatedFields(result);
   const observation = {
     specversion: "1.0",
     id: `local-command.${runId}`,
@@ -462,6 +489,7 @@ export async function executeLocalCommand({
       },
     },
   };
+
   const stored = await new ObservationLedger(store).append(observation);
   return {
     ...result,
