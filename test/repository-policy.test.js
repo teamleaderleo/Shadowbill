@@ -141,6 +141,7 @@ test("lifecycle and freshness contradictions fail closed", async () => {
       signals: [{
         ...policy.signals[0],
         subject: "repository",
+        appliesTo: "repository",
         freshness: { mode: "revision" },
       }],
     }),
