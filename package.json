@@ -10,7 +10,7 @@
     "shadowbill": "./src/main.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-reporter=spec test/*.test.js",
     "serve": "node src/cli.js serve",
     "report": "node src/cli.js report",
     "mcp": "node src/cli.js mcp",
