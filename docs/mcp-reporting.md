@@ -26,28 +26,32 @@ Takes an empty argument object and returns the current fleet projection, includi
 
 Required argument:
 
-- `repository`: canonical lowercase `owner/name` identity
+- `repository`: bounded enrolled repository identity or label
 
 Returns the same selected-revision state as:
 
 ```bash
 proofwake inspect --repo owner/name --output json
+proofwake inspect --repo enrolled-label --output json
 ```
 
 ### `proofwake_revision_evidence`
 
 Required arguments:
 
-- `repository`: canonical lowercase `owner/name` identity
+- `repository`: bounded enrolled repository identity or label
 - `revision`: full lowercase 40-character SHA-1
 
 Returns the same explicit-revision state as:
 
 ```bash
 proofwake inspect FULL_SHA --repo owner/name --output json
+proofwake inspect FULL_SHA --repo enrolled-label --output json
 ```
 
-Unknown fields and malformed identities or revisions produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, trust, coverage, attempts, reruns, recovery, and attention state remain unchanged. The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, prompts, responses, tokens, secrets, and environment values. HTTPS and URN evidence references remain intact; references using local or other URI schemes become digest-backed Proofwake URNs.
+Unknown fields and malformed selectors or revisions produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, trust, coverage, attempts, reruns, recovery, and attention state remain unchanged.
+
+The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, prompts, responses, tokens, secrets, and environment values. Reviewed Proofwake adapter/provider URNs, public query-free HTTPS evidence links, and public GitHub API sources remain visible. Other observation sources become SHA-256-backed Proofwake source identifiers. Local, credential-bearing, query-bearing, arbitrary-URN, or otherwise unreviewed evidence references become digest-backed Proofwake evidence URNs.
 
 ## Shadowbill compatibility tools
 
