@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { ObservationLedger } from "./observation-ledger.js";
@@ -99,16 +99,17 @@ function httpUrl(value, path) {
   return value;
 }
 
-function portablePath(value, path) {
+function producerRelativePath(value, path) {
   text(value, path, { max: 1024 });
-  if (isAbsolute(value) || value.includes("\\") || value.includes(":") || /\s/u.test(value)) {
-    fail("RENDERPROVE_PATH_ESCAPE", "Path must be portable and project-relative.", path);
+  const normalized = value.replaceAll("\\", "/");
+  if (isAbsolute(value) || isAbsolute(normalized) || normalized.includes(":") || normalized.startsWith("//")) {
+    fail("RENDERPROVE_PATH_ESCAPE", "Path must be project-relative.", path);
   }
-  const segments = value.split("/");
+  const segments = normalized.split("/");
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
     fail("RENDERPROVE_PATH_ESCAPE", "Path contains an unsafe segment.", path);
   }
-  return value;
+  return normalized;
 }
 
 function validateRuntime(runtime) {
@@ -128,7 +129,9 @@ function validateRuntime(runtime) {
   exactKeys(runtime.logs, new Set(["stdoutBytes", "stderrBytes", "exit"]), ["stdoutBytes", "stderrBytes", "exit"], "$.runtime.logs");
   count(runtime.logs.stdoutBytes, "$.runtime.logs.stdoutBytes");
   count(runtime.logs.stderrBytes, "$.runtime.logs.stderrBytes");
-  if (runtime.logs.exit !== null && !isObject(runtime.logs.exit)) fail("RENDERPROVE_INVALID_TYPE", "Runtime exit must be an object or null.", "$.runtime.logs.exit");
+  if (runtime.logs.exit !== null && !isObject(runtime.logs.exit)) {
+    fail("RENDERPROVE_INVALID_TYPE", "Runtime exit must be an object or null.", "$.runtime.logs.exit");
+  }
   return { mode };
 }
 
@@ -139,7 +142,9 @@ function validatePage(page, path) {
   ]), ["title", "lang", "bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"], path);
   text(page.title, `${path}.title`, { min: 0, max: 8192 });
   if (page.lang !== null) text(page.lang, `${path}.lang`, { max: 128 });
-  for (const key of ["bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"]) count(page[key], `${path}.${key}`);
+  for (const key of ["bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"]) {
+    count(page[key], `${path}.${key}`);
+  }
   return { unavailable: false, horizontalOverflow: page.scrollWidth > page.clientWidth };
 }
 
@@ -162,7 +167,9 @@ function validateCase(value, index) {
   const status = oneOf(value.status, new Set(["passed", "failed"]), `${path}.status`);
   const startedAt = instant(value.startedAt, `${path}.startedAt`);
   const finishedAt = instant(value.finishedAt, `${path}.finishedAt`);
-  if (Date.parse(finishedAt) < Date.parse(startedAt)) fail("RENDERPROVE_TIME_CONFLICT", "Case finished before it started.", `${path}.finishedAt`);
+  if (Date.parse(finishedAt) < Date.parse(startedAt)) {
+    fail("RENDERPROVE_TIME_CONFLICT", "Case finished before it started.", `${path}.finishedAt`);
+  }
 
   exactKeys(value.route, new Set(["name", "path", "requestedUrl", "finalUrl"]), ["name", "path", "requestedUrl", "finalUrl"], `${path}.route`);
   text(value.route.name, `${path}.route.name`, { min: 0, max: 512 });
@@ -170,6 +177,7 @@ function validateCase(value, index) {
   if (!routePath.startsWith("/")) fail("RENDERPROVE_INVALID_VALUE", "Route path must begin with a slash.", `${path}.route.path`);
   httpUrl(value.route.requestedUrl, `${path}.route.requestedUrl`);
   text(value.route.finalUrl, `${path}.route.finalUrl`, { min: 0, max: 8192 });
+  if (value.route.finalUrl) httpUrl(value.route.finalUrl, `${path}.route.finalUrl`);
 
   exactKeys(value.viewport, new Set(["name", "width", "height", "deviceScaleFactor"]), ["name", "width", "height", "deviceScaleFactor"], `${path}.viewport`);
   text(value.viewport.name, `${path}.viewport.name`, { max: 256 });
@@ -178,11 +186,15 @@ function validateCase(value, index) {
     if (value.viewport[key] < 240) fail("RENDERPROVE_INVALID_VALUE", "Viewport dimension must be at least 240.", `${path}.viewport.${key}`);
   }
   count(value.viewport.deviceScaleFactor, `${path}.viewport.deviceScaleFactor`, 16);
-  if (value.viewport.deviceScaleFactor < 1) fail("RENDERPROVE_INVALID_VALUE", "Device scale factor must be at least 1.", `${path}.viewport.deviceScaleFactor`);
+  if (value.viewport.deviceScaleFactor < 1) {
+    fail("RENDERPROVE_INVALID_VALUE", "Device scale factor must be at least 1.", `${path}.viewport.deviceScaleFactor`);
+  }
 
   exactKeys(value.navigation, new Set(["status", "ok"]), ["status", "ok"], `${path}.navigation`);
   if (value.navigation.status !== null) count(value.navigation.status, `${path}.navigation.status`, 999);
-  if (typeof value.navigation.ok !== "boolean") fail("RENDERPROVE_INVALID_TYPE", "Navigation ok must be boolean.", `${path}.navigation.ok`);
+  if (typeof value.navigation.ok !== "boolean") {
+    fail("RENDERPROVE_INVALID_TYPE", "Navigation ok must be boolean.", `${path}.navigation.ok`);
+  }
   const page = validatePage(value.page, `${path}.page`);
 
   if (!Array.isArray(value.artifacts) || value.artifacts.length > RENDERPROVE_MAX_ARTIFACTS) {
@@ -195,7 +207,7 @@ function validateCase(value, index) {
       fail("RENDERPROVE_ARTIFACT_UNSUPPORTED", "Receipt v1 supports PNG screenshot artifacts only.", artifactPath);
     }
     return {
-      path: portablePath(artifact.path, `${artifactPath}.path`),
+      path: producerRelativePath(artifact.path, `${artifactPath}.path`),
       sha256: text(artifact.sha256, `${artifactPath}.sha256`, { min: 64, max: 64, pattern: SHA256 }),
     };
   });
@@ -226,7 +238,9 @@ export function validateRenderproveReceipt(value) {
   }
   const project = text(value.project, "$.project", { max: 512 });
   exactKeys(value.source, new Set(["manifest"]), ["manifest"], "$.source");
-  const manifest = value.source.manifest === null ? null : portablePath(value.source.manifest, "$.source.manifest");
+  const manifest = value.source.manifest === null
+    ? null
+    : producerRelativePath(value.source.manifest, "$.source.manifest");
   exactKeys(value.target, new Set(["baseUrl"]), ["baseUrl"], "$.target");
   httpUrl(value.target.baseUrl, "$.target.baseUrl");
   const startedAt = instant(value.startedAt, "$.startedAt");
@@ -275,6 +289,7 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
   const canonicalRoot = await realpath(root);
   const candidate = resolve(canonicalRoot, relativePath);
   if (!inside(canonicalRoot, candidate)) fail(`${codePrefix}_PATH_ESCAPE`, "Selected file escapes the repository root.");
+
   let pathMetadata;
   let canonicalCandidate;
   try {
@@ -287,6 +302,7 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
   if (!pathMetadata.isFile()) fail(`${codePrefix}_NOT_FILE`, "Selected file must be a regular file.");
   if (!inside(canonicalRoot, canonicalCandidate)) fail(`${codePrefix}_PATH_ESCAPE`, "Selected file resolves outside the repository root.");
   if (pathMetadata.size > maximumBytes) fail(`${codePrefix}_TOO_LARGE`, `Selected file exceeds ${maximumBytes} bytes.`);
+
   let handle;
   try {
     handle = await open(canonicalCandidate, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -295,7 +311,9 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
   }
   try {
     const before = await handle.stat();
-    if (!before.isFile() || !sameFile(before, pathMetadata)) fail(`${codePrefix}_CHANGED`, "Selected file changed before it could be read.");
+    if (!before.isFile() || !sameFile(before, pathMetadata)) {
+      fail(`${codePrefix}_CHANGED`, "Selected file changed before it could be read.");
+    }
     if (before.size > maximumBytes) fail(`${codePrefix}_TOO_LARGE`, `Selected file exceeds ${maximumBytes} bytes.`);
     const bytes = await handle.readFile();
     const after = await handle.stat();
@@ -310,10 +328,23 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
       fail(`${codePrefix}_CHANGED`, "Selected file changed while it was being read.");
     }
     if (bytes.length > maximumBytes) fail(`${codePrefix}_TOO_LARGE`, `Selected file exceeds ${maximumBytes} bytes.`);
-    return { bytes, sizeBytes: bytes.length, digest: createHash("sha256").update(bytes).digest("hex"), relativePath };
+    return {
+      bytes,
+      sizeBytes: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      relativePath,
+    };
   } finally {
     await handle.close();
   }
+}
+
+async function reverifyBoundedFile(root, snapshot, maximumBytes, codePrefix) {
+  const current = await readBoundedFile(root, snapshot.relativePath, maximumBytes, codePrefix);
+  if (current.digest !== snapshot.digest || current.sizeBytes !== snapshot.sizeBytes) {
+    fail(`${codePrefix}_CHANGED`, "Selected file changed after verification.");
+  }
+  return current;
 }
 
 function decodeUtf8(bytes) {
@@ -346,7 +377,10 @@ async function inspectCheckout(root) {
   const staged = await git(root, ["diff", "--cached", "--quiet", "HEAD", "--"], { allowFailure: true });
   if (!tracked.ok || !staged.ok) fail("RENDERPROVE_CHECKOUT_DIRTY", "Tracked checkout changes prevent revision binding.");
   const untracked = (await git(root, ["ls-files", "--others", "--exclude-standard"])).stdout
-    .split("\n").filter(Boolean).map((value) => value.replaceAll("\\", "/")).sort();
+    .split("\n")
+    .filter(Boolean)
+    .map((value) => value.replaceAll("\\", "/"))
+    .sort();
   return { revision, untracked };
 }
 
@@ -395,6 +429,7 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
     facts.push({ name: `renderprove.case.${identity}.status`, value: item.status });
     facts.push({ name: `renderprove.case.${identity}.navigation-ok`, value: item.navigationOk });
   }
+
   const evidence = [{
     uri: evidenceUri("receipt", receiptFile.digest),
     digest: `sha256:${receiptFile.digest}`,
@@ -420,6 +455,7 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
       disclosure: "restricted-reference",
     });
   }
+
   return {
     specversion: "1.0",
     id: `renderprove.${receiptIdentity}`,
@@ -444,10 +480,19 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
       observedAt: receipt.finishedAt,
       ingestedAt,
       durationMs: receipt.durationMs,
-      relationships: { repository, revision, run: `renderprove-${receiptIdentity.slice(0, 32)}` },
+      relationships: {
+        repository,
+        revision,
+        run: `renderprove-${receiptIdentity.slice(0, 32)}`,
+      },
       facts,
       evidence,
-      coverage: { state: mappedStatus === "unavailable" ? "unavailable" : "complete", redacted: false, truncated: false, omitted: [] },
+      coverage: {
+        state: mappedStatus === "unavailable" ? "unavailable" : "complete",
+        redacted: false,
+        truncated: false,
+        omitted: [],
+      },
     },
   };
 }
@@ -462,17 +507,30 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
     globalPolicy: entry.configuration.source === "global" ? entry.policy : undefined,
     lifecycle: entry.policy.lifecycle.state,
   });
-  if (inspection.policy.repository.kind !== "remote") fail("RENDERPROVE_REPOSITORY_UNSUPPORTED", "Renderprove adapter v1 requires a remote owner/name repository identity.");
+  if (inspection.policy.repository.kind !== "remote") {
+    fail("RENDERPROVE_REPOSITORY_UNSUPPORTED", "Renderprove adapter v1 requires a remote owner/name repository identity.");
+  }
   const repository = inspection.policy.repository.id;
   const adapter = inspection.policy.adapters.find((candidate) => candidate.name === adapterName);
-  if (!adapter || adapter.type !== "receipt-file" || adapter.schema !== "renderprove.receipt.v1") fail("RENDERPROVE_ADAPTER_UNDECLARED", "Repository policy does not declare the selected Renderprove receipt adapter.");
+  if (!adapter || adapter.type !== "receipt-file" || adapter.schema !== "renderprove.receipt.v1") {
+    fail("RENDERPROVE_ADAPTER_UNDECLARED", "Repository policy does not declare the selected Renderprove receipt adapter.");
+  }
   const readiness = inspection.adapterReadiness[adapterName];
-  if (!readiness || readiness.state !== "ready") fail(readiness?.code ?? "RENDERPROVE_RECEIPT_UNAVAILABLE", "Declared Renderprove receipt is not ready for ingestion.");
-  const signal = inspection.policy.signals.find((candidate) => candidate.kind === "browser-review" && candidate.acceptedSources.includes(`adapter:${adapterName}`));
-  if (!signal) fail("RENDERPROVE_SIGNAL_UNDECLARED", "Repository policy does not accept this adapter for browser-review evidence.");
+  if (!readiness || readiness.state !== "ready") {
+    fail(readiness?.code ?? "RENDERPROVE_RECEIPT_UNAVAILABLE", "Declared Renderprove receipt is not ready for ingestion.");
+  }
+  const signal = inspection.policy.signals.find((candidate) =>
+    candidate.kind === "browser-review" && candidate.acceptedSources.includes(`adapter:${adapterName}`));
+  if (!signal) {
+    fail("RENDERPROVE_SIGNAL_UNDECLARED", "Repository policy does not accept this adapter for browser-review evidence.");
+  }
+
   const before = await inspectCheckout(entry.root);
-  if (revision !== undefined && revision !== before.revision) fail("RENDERPROVE_REVISION_CONFLICT", "Explicit revision must match the clean current checkout.", "$.revision");
-  const receiptFile = await readBoundedFile(entry.root, adapter.path, RENDERPROVE_RECEIPT_MAX_BYTES, "RENDERPROVE_RECEIPT");
+  if (revision !== undefined && revision !== before.revision) {
+    fail("RENDERPROVE_REVISION_CONFLICT", "Explicit revision must match the clean current checkout.", "$.revision");
+  }
+
+  let receiptFile = await readBoundedFile(entry.root, adapter.path, RENDERPROVE_RECEIPT_MAX_BYTES, "RENDERPROVE_RECEIPT");
   const raw = parseStrictJson(decodeUtf8(receiptFile.bytes), {
     maxBytes: RENDERPROVE_RECEIPT_MAX_BYTES,
     maxDepth: 24,
@@ -483,7 +541,10 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
   });
   const receipt = validateRenderproveReceipt(raw);
   const ingestedAt = now.toISOString();
-  if (Date.parse(ingestedAt) < Date.parse(receipt.finishedAt)) fail("RENDERPROVE_CLOCK_SKEW", "Receipt completion time is later than the ingestion clock.", "$.finishedAt");
+  if (Date.parse(ingestedAt) < Date.parse(receipt.finishedAt)) {
+    fail("RENDERPROVE_CLOCK_SKEW", "Receipt completion time is later than the ingestion clock.", "$.finishedAt");
+  }
+
   const artifactPaths = [];
   const artifactsByPath = new Map();
   let artifactBytes = 0;
@@ -492,23 +553,53 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
       artifactPaths.push(reference.path);
       const existing = artifactsByPath.get(reference.path);
       if (existing) {
-        if (existing.digest !== reference.sha256) fail("RENDERPROVE_ARTIFACT_REFERENCE_CONFLICT", "One artifact path has conflicting receipt digests.");
+        if (existing.digest !== reference.sha256) {
+          fail("RENDERPROVE_ARTIFACT_REFERENCE_CONFLICT", "One artifact path has conflicting receipt digests.");
+        }
         continue;
       }
       const artifact = await readBoundedFile(entry.root, reference.path, RENDERPROVE_ARTIFACT_MAX_BYTES, "RENDERPROVE_ARTIFACT");
-      if (artifact.digest !== reference.sha256) fail("RENDERPROVE_ARTIFACT_DIGEST_MISMATCH", "Screenshot digest does not match the receipt.");
-      if (!hasPngSignature(artifact.bytes)) fail("RENDERPROVE_ARTIFACT_MEDIA_MISMATCH", "Screenshot bytes do not match image/png.");
+      if (artifact.digest !== reference.sha256) {
+        fail("RENDERPROVE_ARTIFACT_DIGEST_MISMATCH", "Screenshot digest does not match the receipt.");
+      }
+      if (!hasPngSignature(artifact.bytes)) {
+        fail("RENDERPROVE_ARTIFACT_MEDIA_MISMATCH", "Screenshot bytes do not match image/png.");
+      }
       artifactBytes += artifact.sizeBytes;
-      if (artifactBytes > RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES) fail("RENDERPROVE_ARTIFACT_TOTAL_TOO_LARGE", `Verified artifacts exceed ${RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES} bytes.`);
+      if (artifactBytes > RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES) {
+        fail("RENDERPROVE_ARTIFACT_TOTAL_TOO_LARGE", `Verified artifacts exceed ${RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES} bytes.`);
+      }
       artifactsByPath.set(reference.path, artifact);
     }
   }
+
   const allowedUntracked = new Set([adapter.path, ...artifactPaths].map((value) => value.replaceAll("\\", "/")));
-  if (before.untracked.some((value) => !allowedUntracked.has(value))) fail("RENDERPROVE_CHECKOUT_DIRTY", "Untracked project files prevent revision binding.");
+  if (before.untracked.some((value) => !allowedUntracked.has(value))) {
+    fail("RENDERPROVE_CHECKOUT_DIRTY", "Untracked project files prevent revision binding.");
+  }
   const after = await inspectCheckout(entry.root);
-  if (after.revision !== before.revision || after.untracked.some((value) => !allowedUntracked.has(value))) fail("RENDERPROVE_CHECKOUT_CHANGED", "Checkout changed while the receipt was being verified.");
-  const artifacts = [...artifactsByPath.values()];
-  const observation = buildObservation({ repository, revision: before.revision, receipt, receiptFile, artifacts, ingestedAt });
+  if (after.revision !== before.revision || after.untracked.some((value) => !allowedUntracked.has(value))) {
+    fail("RENDERPROVE_CHECKOUT_CHANGED", "Checkout changed while the receipt was being verified.");
+  }
+
+  receiptFile = await reverifyBoundedFile(entry.root, receiptFile, RENDERPROVE_RECEIPT_MAX_BYTES, "RENDERPROVE_RECEIPT");
+  const artifacts = [];
+  for (const snapshot of artifactsByPath.values()) {
+    const verified = await reverifyBoundedFile(entry.root, snapshot, RENDERPROVE_ARTIFACT_MAX_BYTES, "RENDERPROVE_ARTIFACT");
+    if (!hasPngSignature(verified.bytes)) {
+      fail("RENDERPROVE_ARTIFACT_MEDIA_MISMATCH", "Screenshot bytes do not match image/png.");
+    }
+    artifacts.push(verified);
+  }
+
+  const observation = buildObservation({
+    repository,
+    revision: before.revision,
+    receipt,
+    receiptFile,
+    artifacts,
+    ingestedAt,
+  });
   const result = await new ObservationLedger(eventStore).append(observation);
   return {
     ...result,
