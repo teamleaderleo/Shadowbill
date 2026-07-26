@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { buildRepositoryInventory } from "./repository-inventory.js";
+import { inspectRepositoryEnrollment } from "./repository-enrollment.js";
 import { buildFleetProjection as buildRawFleetProjection } from "./revision-projection.js";
 
 const INCOMPLETE_STATES = new Set([
@@ -27,10 +28,7 @@ function defaultBranchSignalKinds(item) {
     .map((signal) => signal.kind));
 }
 
-function enforceDefaultBranchAuthority(repository, item) {
-  if (repository.revision?.defaultBranchConfidence !== "conventional-current") return;
-  const kinds = defaultBranchSignalKinds(item);
-  const reason = "Default-branch selection requires an explicit local remote HEAD.";
+function markDefaultBranchUnavailable(repository, kinds, reason) {
   repository.requiredSignals = repository.requiredSignals.map((signal) => kinds.has(signal.kind)
     ? { ...signal, state: "selection-unavailable", latest: null }
     : signal);
@@ -39,6 +37,33 @@ function enforceDefaultBranchAuthority(repository, item) {
   repository.revision.defaultBranchSelected = false;
   repository.revision.defaultBranchConfidence = "unavailable";
   repository.selectorCorrection = { code: "PROJECTION_DEFAULT_BRANCH_UNVERIFIED", reason };
+}
+
+async function enforceDefaultBranchAuthority(repository, item) {
+  const kinds = defaultBranchSignalKinds(item);
+  if (kinds.size === 0) return;
+  if (repository.revision?.defaultBranchConfidence === "conventional-current") {
+    markDefaultBranchUnavailable(repository, kinds, "Default-branch selection requires an explicit local remote HEAD.");
+    return;
+  }
+  if (repository.revision?.defaultBranchConfidence !== "remote-head") return;
+  if (item.policy?.repository?.kind !== "remote") {
+    markDefaultBranchUnavailable(repository, kinds, "Default-branch selection requires a verified remote repository identity.");
+    return;
+  }
+
+  try {
+    const inspection = await inspectRepositoryEnrollment(item.root, {
+      globalPolicy: item.policySource === "global" ? item.policy : undefined,
+      lifecycle: item.policy.lifecycle.state,
+    });
+    const origin = inspection.remotes.find((remote) => remote.name === "origin");
+    if (origin?.repository !== item.policy.repository.id) {
+      markDefaultBranchUnavailable(repository, kinds, "The local origin remote HEAD does not belong to the enrolled repository identity.");
+    }
+  } catch {
+    markDefaultBranchUnavailable(repository, kinds, "Default-branch remote identity could not be verified.");
+  }
 }
 
 function repositoryStatus(repository, item) {
@@ -101,7 +126,7 @@ export async function buildFleetProjection(options) {
   for (const repository of report.repositories) {
     const item = inventoryByIdentity.get(repository.repository.identity) ?? repository;
     repository.problems = item.problems ?? [];
-    enforceDefaultBranchAuthority(repository, item);
+    await enforceDefaultBranchAuthority(repository, item);
     repository.status = repositoryStatus(repository, item);
     const currentFailure = repository.requiredSignals.find((signal) => signal.state === "failing") ?? null;
     const missingOrStale = repository.requiredSignals.find((signal) => INCOMPLETE_STATES.has(signal.state)) ?? null;
