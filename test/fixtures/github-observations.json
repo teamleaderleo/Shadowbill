@@ -1,0 +1,200 @@
+{
+  "push": {
+    "eventName": "push",
+    "deliveryId": "delivery-push-1",
+    "receivedAt": "2026-07-25T17:00:05.000Z",
+    "payload": {
+      "ref": "refs/heads/private/customer-fix",
+      "before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "created": false,
+      "deleted": false,
+      "forced": true,
+      "repository": { "full_name": "Owner/Repo", "clone_url": "https://user:PRIVATE_CREDENTIAL_SENTINEL@github.com/Owner/Repo.git" },
+      "head_commit": { "timestamp": "2026-07-25T17:00:00Z", "message": "PRIVATE_PUSH_COMMIT_SENTINEL" },
+      "commits": [
+        { "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "message": "PRIVATE_PUSH_COMMIT_SENTINEL", "added": ["private/path.js"] },
+        { "id": "cccccccccccccccccccccccccccccccccccccccc", "message": "PRIVATE_PUSH_SECOND_SENTINEL" }
+      ],
+      "size": 2
+    }
+  },
+  "pullRequest": {
+    "eventName": "pull_request",
+    "deliveryId": "delivery-pr-1",
+    "receivedAt": "2026-07-25T18:00:05.000Z",
+    "payload": {
+      "action": "closed",
+      "number": 42,
+      "repository": { "full_name": "Owner/Repo" },
+      "pull_request": {
+        "state": "closed",
+        "merged": true,
+        "draft": false,
+        "merged_at": "2026-07-25T18:00:00Z",
+        "updated_at": "2026-07-25T18:00:01Z",
+        "head": { "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        "base": { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "additions": 120,
+        "deletions": 30,
+        "changed_files": 5,
+        "title": "PRIVATE_PR_TITLE_SENTINEL",
+        "body": "PRIVATE_PR_BODY_SENTINEL",
+        "patch_url": "https://github.com/Owner/Repo/pull/42.patch"
+      }
+    }
+  },
+  "workflowSuccess": {
+    "eventName": "workflow_run",
+    "deliveryId": "delivery-workflow-success",
+    "receivedAt": "2026-07-25T18:04:35.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "workflow_run": {
+        "id": 9001,
+        "name": "PRIVATE_WORKFLOW_NAME_SENTINEL",
+        "path": ".github/workflows/private-ci.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "run_attempt": 1,
+        "run_started_at": "2026-07-25T18:01:00Z",
+        "updated_at": "2026-07-25T18:04:30Z",
+        "logs_url": "https://api.github.com/private/logs"
+      }
+    }
+  },
+  "workflowFailure": {
+    "eventName": "workflow_run",
+    "deliveryId": "delivery-workflow-failure",
+    "receivedAt": "2026-07-25T18:05:05.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "workflow_run": {
+        "id": 9002,
+        "name": "PRIVATE_FAILURE_WORKFLOW_SENTINEL",
+        "status": "completed",
+        "conclusion": "failure",
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "run_attempt": 1,
+        "run_started_at": "2026-07-25T18:04:40Z",
+        "updated_at": "2026-07-25T18:05:00Z"
+      }
+    }
+  },
+  "workflowCancelled": {
+    "eventName": "workflow_run",
+    "deliveryId": "delivery-workflow-cancelled",
+    "receivedAt": "2026-07-25T18:06:05.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "workflow_run": {
+        "id": 9003,
+        "name": "PRIVATE_CANCELLED_WORKFLOW_SENTINEL",
+        "status": "completed",
+        "conclusion": "cancelled",
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "run_attempt": 1,
+        "run_started_at": "2026-07-25T18:05:30Z",
+        "updated_at": "2026-07-25T18:06:00Z"
+      }
+    }
+  },
+  "workflowRerun": {
+    "eventName": "workflow_run",
+    "deliveryId": "delivery-workflow-rerun",
+    "receivedAt": "2026-07-25T18:08:05.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "workflow_run": {
+        "id": 9002,
+        "name": "PRIVATE_RERUN_WORKFLOW_SENTINEL",
+        "status": "completed",
+        "conclusion": "success",
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "run_attempt": 2,
+        "run_started_at": "2026-07-25T18:07:00Z",
+        "updated_at": "2026-07-25T18:08:00Z"
+      }
+    }
+  },
+  "deploymentSuccess": {
+    "eventName": "deployment_status",
+    "deliveryId": "delivery-deployment-success",
+    "receivedAt": "2026-07-25T18:10:05.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "deployment": {
+        "id": 777,
+        "environment": "PRIVATE_ENVIRONMENT_SENTINEL",
+        "description": "PRIVATE_DEPLOYMENT_DESCRIPTION_SENTINEL",
+        "sha": "cccccccccccccccccccccccccccccccccccccccc",
+        "ref": "private/customer-fix",
+        "payload": { "credential": "PRIVATE_CREDENTIAL_SENTINEL" }
+      },
+      "deployment_status": {
+        "state": "success",
+        "updated_at": "2026-07-25T18:10:00Z",
+        "environment_url": "https://private.example.test/deployment/777",
+        "log_url": "https://private.example.test/logs/777"
+      }
+    }
+  },
+  "deploymentFailure": {
+    "eventName": "deployment_status",
+    "deliveryId": "delivery-deployment-failure",
+    "receivedAt": "2026-07-25T18:11:05.000Z",
+    "payload": {
+      "repository": { "full_name": "Owner/Repo" },
+      "deployment": {
+        "id": 778,
+        "environment": "PRIVATE_FAILURE_ENVIRONMENT_SENTINEL",
+        "sha": "dddddddddddddddddddddddddddddddddddddddd",
+        "ref": "main"
+      },
+      "deployment_status": {
+        "state": "failure",
+        "updated_at": "2026-07-25T18:11:00Z",
+        "environment_url": "https://private.example.test/deployment/778"
+      }
+    }
+  },
+  "release": {
+    "eventName": "release",
+    "deliveryId": "delivery-release-1",
+    "receivedAt": "2026-07-25T19:00:05.000Z",
+    "payload": {
+      "action": "published",
+      "repository": { "full_name": "Owner/Repo" },
+      "release": {
+        "id": 501,
+        "draft": false,
+        "prerelease": false,
+        "published_at": "2026-07-25T19:00:00Z",
+        "target_commitish": "dddddddddddddddddddddddddddddddddddddddd",
+        "tag_name": "PRIVATE_RELEASE_TAG_SENTINEL",
+        "name": "PRIVATE_RELEASE_NAME_SENTINEL",
+        "body": "PRIVATE_RELEASE_BODY_SENTINEL",
+        "html_url": "https://github.com/Owner/Repo/releases/private"
+      }
+    }
+  },
+  "releaseWithoutRevisionAuthority": {
+    "eventName": "release",
+    "deliveryId": "delivery-release-branch",
+    "receivedAt": "2026-07-25T19:01:05.000Z",
+    "payload": {
+      "action": "published",
+      "repository": { "full_name": "Owner/Repo" },
+      "release": {
+        "id": 502,
+        "draft": false,
+        "prerelease": false,
+        "published_at": "2026-07-25T19:01:00Z",
+        "target_commitish": "main",
+        "body": "PRIVATE_UNSUPPORTED_RELEASE_SENTINEL"
+      }
+    }
+  }
+}
