@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const main = fileURLToPath(new URL("../src/main.js", import.meta.url));
 const iterations = integerArgument(process.argv[2] ?? "64", "iterations", 1, 4096);
-const seed = integerArgument(process.argv[3] ?? "1337", "seed", 0, 0x7fffffff);
+const seed = integerArgument(process.argv[3] ?? "1337", "seed", 0, 0xffffffff);
 const directory = mkdtempSync(join(tmpdir(), "proofwake-observation-fuzz-"));
+const PRIVATE_MARKER = "proofwake-secret-sentinel";
 
 function integerArgument(value, name, minimum, maximum) {
   if (!/^\d+$/u.test(value)) throw new Error(`${name} must be an integer`);
@@ -75,7 +76,7 @@ function compact(value) {
 const mutations = [
   (value) => compact(value).replace('"id":"fuzz-valid"', '"id":"first","id":"fuzz-valid"'),
   (value) => compact(value).replace('"name":"fuzz-harness"', '"name":"first","name":"fuzz-harness"'),
-  (value) => compact({ ...value, privateUnknownField: "sentinel" }),
+  (value) => compact({ ...value, [PRIVATE_MARKER]: "sentinel-value" }),
   (value) => compact({ ...value, data: { ...value.data, privateUnknownField: "sentinel" } }),
   (value) => `${compact(value)} trailing`,
   (value) => compact(value).replace('"id":"fuzz-valid"', '"id":"\\x"'),
@@ -149,10 +150,14 @@ function invoke(text, dataPath) {
     encoding: "utf8",
     input: text,
     maxBuffer: 2 * 1024 * 1024,
+    timeout: 15_000,
+    killSignal: "SIGKILL",
   });
 }
 
 function response(result, label) {
+  if (result.error) throw new Error(`${label}: process failed with ${result.error.code ?? result.error.message}`);
+  if (result.signal) throw new Error(`${label}: process ended with ${result.signal}`);
   if (result.stderr !== "") throw new Error(`${label}: machine mode wrote to stderr`);
   try {
     return JSON.parse(result.stdout);
@@ -161,24 +166,40 @@ function response(result, label) {
   }
 }
 
+function ledgerEntries(dataPath) {
+  if (!existsSync(dataPath)) return 0;
+  return readFileSync(dataPath, "utf8").split("\n").filter((line) => line.trim().length > 0).length;
+}
+
 try {
-  const validResult = invoke(compact(baseObservation()), join(directory, "valid.jsonl"));
+  const validPath = join(directory, "valid.jsonl");
+  const validResult = invoke(compact(baseObservation()), validPath);
   const validResponse = response(validResult, "valid baseline");
   if (validResult.status !== 0 || validResponse.status !== "inserted") {
     throw new Error(`valid baseline rejected with ${validResponse.error?.code ?? validResponse.status}`);
   }
+  if (ledgerEntries(validPath) !== 1) throw new Error("valid baseline did not create exactly one ledger entry");
 
   const random = generator(seed);
   const codes = new Map();
+  const operatorHits = Array.from({ length: mutations.length }, () => 0);
   for (let index = 0; index < iterations; index += 1) {
-    const mutationIndex = random() % mutations.length;
-    const value = baseObservation(`fuzz-valid-${index}`);
-    value.id = "fuzz-valid";
+    const mutationIndex = index < mutations.length ? index : random() % mutations.length;
+    operatorHits[mutationIndex] += 1;
+    const value = baseObservation();
     const text = mutations[mutationIndex](value);
-    const result = invoke(text, join(directory, `mutation-${index}.jsonl`));
+    const dataPath = join(directory, `mutation-${index}.jsonl`);
+    const result = invoke(text, dataPath);
     const body = response(result, `mutation ${index}`);
     if (result.status === 0 || body.status !== "error") {
       throw new Error(`mutation ${index} operator ${mutationIndex} was accepted`);
+    }
+    if (ledgerEntries(dataPath) !== 0) {
+      throw new Error(`mutation ${index} operator ${mutationIndex} changed the accepted ledger`);
+    }
+    const serialized = JSON.stringify(body);
+    if (serialized.includes(PRIVATE_MARKER) || serialized.includes("sentinel-value")) {
+      throw new Error(`mutation ${index} disclosed attacker-controlled content`);
     }
     const code = body.error?.code;
     if (typeof code !== "string" || !code.startsWith("OBSERVATION_")) {
@@ -187,12 +208,20 @@ try {
     codes.set(code, (codes.get(code) ?? 0) + 1);
   }
 
+  const exercisedOperators = operatorHits.filter((count) => count > 0).length;
+  if (iterations >= mutations.length && exercisedOperators !== mutations.length) {
+    throw new Error(`only ${exercisedOperators}/${mutations.length} mutation operators were exercised`);
+  }
+
   process.stdout.write(`${JSON.stringify({
     service: "proofwake",
     command: "fuzz-observation-cli",
     status: "passed",
     iterations,
     seed,
+    operatorCount: mutations.length,
+    exercisedOperators,
+    operatorHits,
     distinctErrorCodes: codes.size,
     errors: Object.fromEntries([...codes].sort()),
   }, null, 2)}\n`);
