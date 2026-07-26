@@ -8,6 +8,9 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { createProofwakeMcpSession } from "../src/evidence-mcp.js";
 import { DEFAULT_WORKING_PROFILE } from "../src/estimate.js";
+import { buildFleetProjection } from "../src/fleet-projection.js";
+import { buildFailureReport, buildRecoveryReport } from "../src/history-reports.js";
+import { buildRevisionProjection } from "../src/inspect-projection.js";
 import { inspectRepositoryEnrollment } from "../src/repository-enrollment.js";
 import { ObservationLedger } from "../src/observation-ledger.js";
 import { loadPricingCatalog } from "../src/pricing.js";
@@ -122,6 +125,10 @@ async function fixture(callback) {
   }
 }
 
+function reportNow(result) {
+  return new Date(result.result.structuredContent.generatedAt);
+}
+
 test("Proofwake MCP lists evidence first and returns shared projection contracts", async () => {
   await fixture(async ({ directory, root, dataPath, registryPath, revision, registryStore, eventStore, pricing }) => {
     const session = createProofwakeMcpSession({
@@ -152,18 +159,61 @@ test("Proofwake MCP lists evidence first and returns shared projection contracts
 
     const fleet = await session.handle(call(3, "proofwake_fleet_status"));
     assert.equal(fleet.result.structuredContent.summary.green, 1);
+    const fleetDirect = await buildFleetProjection({ registryStore, eventStore, now: reportNow(fleet) });
+    assert.equal(fleet.result.structuredContent.sourceCursor, fleetDirect.sourceCursor);
+    assert.deepEqual(fleet.result.structuredContent.summary, fleetDirect.summary);
+    assert.deepEqual(fleet.result.structuredContent.repositories, fleetDirect.repositories);
+
     const repositoryReport = await session.handle(call(4, "proofwake_repository_status", { repository }));
     assert.equal(repositoryReport.result.structuredContent.status, "green");
     assert.equal(repositoryReport.result.structuredContent.selectedRevision, revision);
+    const repositoryDirect = await buildRevisionProjection({
+      repository,
+      registryStore,
+      eventStore,
+      now: reportNow(repositoryReport),
+    });
+    assert.equal(repositoryReport.result.structuredContent.sourceCursor, repositoryDirect.sourceCursor);
+    assert.deepEqual(repositoryReport.result.structuredContent.signals, repositoryDirect.signals);
+
     const revisionReport = await session.handle(call(5, "proofwake_revision_evidence", { repository, revision }));
     assert.equal(revisionReport.result.structuredContent.sourceCursor, repositoryReport.result.structuredContent.sourceCursor);
+    const revisionDirect = await buildRevisionProjection({
+      repository,
+      revision,
+      registryStore,
+      eventStore,
+      now: reportNow(revisionReport),
+    });
+    assert.equal(revisionReport.result.structuredContent.sourceCursor, revisionDirect.sourceCursor);
+    assert.deepEqual(revisionReport.result.structuredContent.signals, revisionDirect.signals);
+
     const failures = await session.handle(call(6, "proofwake_recent_failures", { days: 1 }));
     assert.equal(failures.result.structuredContent.summary.total, 1);
     assert.equal(failures.result.structuredContent.summary.resolved, 1);
+    const failuresDirect = await buildFailureReport({
+      registryStore,
+      eventStore,
+      days: 1,
+      now: reportNow(failures),
+    });
+    assert.equal(failures.result.structuredContent.sourceCursor, failuresDirect.sourceCursor);
+    assert.deepEqual(failures.result.structuredContent.summary, failuresDirect.summary);
+    assert.deepEqual(failures.result.structuredContent.failures, failuresDirect.failures);
+
     const recoveries = await session.handle(call(7, "proofwake_recovery_report", { days: 1 }));
     assert.equal(recoveries.result.structuredContent.summary.total, 1);
     assert.equal(recoveries.result.structuredContent.recoveries[0].from.id, "failed");
     assert.equal(recoveries.result.structuredContent.recoveries[0].to.id, "passed");
+    const recoveriesDirect = await buildRecoveryReport({
+      registryStore,
+      eventStore,
+      days: 1,
+      now: reportNow(recoveries),
+    });
+    assert.equal(recoveries.result.structuredContent.sourceCursor, recoveriesDirect.sourceCursor);
+    assert.deepEqual(recoveries.result.structuredContent.summary, recoveriesDirect.summary);
+    assert.deepEqual(recoveries.result.structuredContent.recoveries, recoveriesDirect.recoveries);
 
     const invalid = await session.handle(call(8, "proofwake_recent_failures", { days: 0 }));
     assert.equal(invalid.result.isError, true);
