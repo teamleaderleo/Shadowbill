@@ -222,12 +222,16 @@ function matchedRecords(state) {
   return state.matched.map((item) => item.record);
 }
 
+function availableItems(state, window) {
+  return state.matched.filter((item) => item.record.observedAt <= window.endAt);
+}
+
 export async function buildFailureReport({ registryStore, eventStore, days = 30, now = new Date() }) {
   validateDays(days);
   const state = await snapshot({ registryStore, eventStore });
   const window = reportWindow(now, days);
   const grouped = new Map();
-  for (const item of state.matched) {
+  for (const item of availableItems(state, window)) {
     const key = groupKey(item);
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(item);
@@ -237,7 +241,7 @@ export async function buildFailureReport({ registryStore, eventStore, days = 30,
   for (const items of grouped.values()) {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
-      if (!TERMINAL_FAILURES.has(item.record.status) || item.record.observedAt < window.startAt || item.record.observedAt > window.endAt) continue;
+      if (!TERMINAL_FAILURES.has(item.record.status) || item.record.observedAt < window.startAt) continue;
       const passing = items.slice(index + 1).find((candidate) => completePass(candidate.record)) ?? null;
       failures.push({
         ...recordSummary(item.record, item.policy),
@@ -272,7 +276,7 @@ export async function buildRecoveryReport({ registryStore, eventStore, days = 30
   const state = await snapshot({ registryStore, eventStore });
   const window = reportWindow(now, days);
   const grouped = new Map();
-  for (const item of state.matched) {
+  for (const item of availableItems(state, window)) {
     const key = groupKey(item);
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(item);
@@ -287,7 +291,7 @@ export async function buildRecoveryReport({ registryStore, eventStore, days = 30
         continue;
       }
       if (!pendingFailure || !completePass(item.record)) continue;
-      if (item.record.observedAt >= window.startAt && item.record.observedAt <= window.endAt) {
+      if (item.record.observedAt >= window.startAt) {
         const revisionScoped = item.policy.subject === "revision";
         recoveries.push({
           type: revisionScoped ? "same-revision-rerun" : "same-subject-rerun",
