@@ -1,0 +1,162 @@
+name: Temporary GitHub webhook boundary patch
+
+on:
+  push:
+    branches:
+      - fix/github-webhook-strict-ledger-errors
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/github-webhook-strict-ledger-errors
+          show-progress: false
+      - name: Apply reviewed route corrections
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("src/server.js")
+          text = path.read_text()
+          changes = [
+              (
+                  'import { RepositoryRegistryStore } from "./repository-registry.js";\n',
+                  'import { RepositoryRegistryStore } from "./repository-registry.js";\nimport { parseStrictJson } from "./strict-json.js";\n',
+              ),
+              (
+                  '''function parseJson(body) {
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+''',
+                  '''function parseJson(body) {
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function parseGitHubWebhookJson(body) {
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  return parseStrictJson(text, {
+    maxBytes: 2_000_000,
+    maxDepth: 64,
+    maxStringLength: 2_000_000,
+    maxObjectKeys: 16_384,
+    maxArrayLength: 16_384,
+    prefix: "GITHUB_WEBHOOK_JSON",
+  });
+}
+''',
+              ),
+              (
+                  '''async function canonicalGitHubReceivedAt(options, eventName, deliveryId) {
+  const captured = canonicalNow(options);
+  const events = await options.store.readAll();
+  const existing = matchingGitHubObservation(events, eventName, deliveryId);
+  const observedAt = existing?.observation?.data?.observedAt;
+  return typeof observedAt === "string" && !Number.isNaN(Date.parse(observedAt)) ? observedAt : captured;
+}
+
+''',
+                  '',
+              ),
+              (
+                  '''        const payload = parseJson(body);
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_JSON",
+            "GitHub webhook JSON must be an object.",
+          ));
+          return;
+        }
+
+        let observation;
+        try {
+          const receivedAt = await canonicalGitHubReceivedAt(options, eventName, deliveryId);
+          observation = mapGitHubWebhookObservation(eventName, deliveryId, payload, {
+            signatureVerified: true,
+            receivedAt,
+          });
+''',
+                  '''        let payload;
+        try {
+          payload = parseGitHubWebhookJson(body);
+        } catch {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_JSON",
+            "GitHub webhook JSON must be one bounded strict object.",
+          ));
+          return;
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_JSON",
+            "GitHub webhook JSON must be one bounded strict object.",
+          ));
+          return;
+        }
+
+        let observation;
+        try {
+          observation = mapGitHubWebhookObservation(eventName, deliveryId, payload, {
+            signatureVerified: true,
+            receivedAt: canonicalNow(options),
+          });
+''',
+              ),
+              (
+                  '''          if (error?.code === "OBSERVATION_ID_CONFLICT") {
+            try {
+              const existing = matchingGitHubObservation(await options.store.readAll(), eventName, deliveryId);
+              if (sameGitHubDelivery(existing, observation)) {
+                sendJson(response, 202, { accepted: true, duplicate: true, id: observation.id });
+                return;
+              }
+            } catch {
+              // Preserve the bounded conflict response below.
+            }
+            sendJson(response, 409, githubWebhookFailure(
+''',
+                  '''          if (error?.code === "OBSERVATION_ID_CONFLICT") {
+            let existing;
+            try {
+              existing = matchingGitHubObservation(await options.store.readAll(), eventName, deliveryId);
+            } catch {
+              sendJson(response, 500, githubWebhookFailure(
+                "GITHUB_WEBHOOK_INGESTION_FAILED",
+                "GitHub webhook ingestion failed.",
+              ));
+              return;
+            }
+            if (sameGitHubDelivery(existing, observation)) {
+              sendJson(response, 202, { accepted: true, duplicate: true, id: observation.id });
+              return;
+            }
+            sendJson(response, 409, githubWebhookFailure(
+''',
+              ),
+          ]
+          for old, new in changes:
+              if old not in text:
+                  raise SystemExit(f"missing exact patch anchor: {old[:120]!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          rm .github/workflows/temporary-patch-github-webhook-boundary.yml
+      - name: Commit final route correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden signed GitHub webhook parsing and storage errors"
+          git push origin HEAD:fix/github-webhook-strict-ledger-errors
