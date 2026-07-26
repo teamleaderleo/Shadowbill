@@ -4,7 +4,7 @@
 
 This document defines the migration seam between legacy Shadowbill delivery events and Proofwake observation-v1 activity. It does not change collector writes by itself.
 
-The implementation lives in `src/activity-view.js` and consumes the pure mapping contract from issue #69's mapper slice.
+The implementation lives in `src/activity-view.js` and consumes the pure mapping contract merged in PR #79.
 
 ## Purpose
 
@@ -132,6 +132,17 @@ Relationships:
 - `deployment` — required exact `github-deployment-N` provider identity.
 
 Observation status maps to the legacy deployment state. Environment names, refs, URLs, descriptions, logs, and provider payload content remain excluded.
+
+## Accepted ledger boundary
+
+A row can replace legacy activity only when it is a canonical ObservationLedger record:
+
+- `observationIdentity` exactly matches the nested observation source and ID;
+- `requestFingerprint` matches the canonical observation fingerprint;
+- the nested observation passes the strict observation-v1 validator;
+- adapter name and trust match the recognised source family.
+
+A hand-authored row that merely claims `proofwake_observation` or `signed-provider` cannot suppress a legacy event.
 
 ## Boundaries
 
