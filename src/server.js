@@ -14,6 +14,7 @@ import { ObservationLedger } from "./observation-ledger.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
 import { RepositoryRegistryStore } from "./repository-registry.js";
+import { parseStrictJson } from "./strict-json.js";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -66,6 +67,18 @@ function parseJson(body) {
   } catch {
     return null;
   }
+}
+
+function parseGitHubWebhookJson(body) {
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+  return parseStrictJson(text, {
+    maxBytes: 2_000_000,
+    maxDepth: 64,
+    maxStringLength: 2_000_000,
+    maxObjectKeys: 16_384,
+    maxArrayLength: 16_384,
+    prefix: "GITHUB_WEBHOOK_JSON",
+  });
 }
 
 function safeInteger(value) {
@@ -232,14 +245,6 @@ function matchingGitHubObservation(events, eventName, deliveryId) {
   return events.find((entry) => entry?.type === "proofwake_observation" &&
     entry.observationIdentity?.source === GITHUB_OBSERVATION_SOURCE &&
     entry.observationIdentity?.id === id) ?? null;
-}
-
-async function canonicalGitHubReceivedAt(options, eventName, deliveryId) {
-  const captured = canonicalNow(options);
-  const events = await options.store.readAll();
-  const existing = matchingGitHubObservation(events, eventName, deliveryId);
-  const observedAt = existing?.observation?.data?.observedAt;
-  return typeof observedAt === "string" && !Number.isNaN(Date.parse(observedAt)) ? observedAt : captured;
 }
 
 function sameGitHubDelivery(existing, observation) {
@@ -428,21 +433,29 @@ export function createCollectorServer(options) {
           return;
         }
 
-        const payload = parseJson(body);
+        let payload;
+        try {
+          payload = parseGitHubWebhookJson(body);
+        } catch {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_JSON",
+            "GitHub webhook JSON must be one bounded strict object.",
+          ));
+          return;
+        }
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
           sendJson(response, 400, githubWebhookFailure(
             "GITHUB_WEBHOOK_INVALID_JSON",
-            "GitHub webhook JSON must be an object.",
+            "GitHub webhook JSON must be one bounded strict object.",
           ));
           return;
         }
 
         let observation;
         try {
-          const receivedAt = await canonicalGitHubReceivedAt(options, eventName, deliveryId);
           observation = mapGitHubWebhookObservation(eventName, deliveryId, payload, {
             signatureVerified: true,
-            receivedAt,
+            receivedAt: canonicalNow(options),
           });
         } catch (error) {
           sendJson(response, 400, boundedGitHubMappingError(error));
@@ -463,14 +476,19 @@ export function createCollectorServer(options) {
           });
         } catch (error) {
           if (error?.code === "OBSERVATION_ID_CONFLICT") {
+            let existing;
             try {
-              const existing = matchingGitHubObservation(await options.store.readAll(), eventName, deliveryId);
-              if (sameGitHubDelivery(existing, observation)) {
-                sendJson(response, 202, { accepted: true, duplicate: true, id: observation.id });
-                return;
-              }
+              existing = matchingGitHubObservation(await options.store.readAll(), eventName, deliveryId);
             } catch {
-              // Preserve the bounded conflict response below.
+              sendJson(response, 500, githubWebhookFailure(
+                "GITHUB_WEBHOOK_INGESTION_FAILED",
+                "GitHub webhook ingestion failed.",
+              ));
+              return;
+            }
+            if (sameGitHubDelivery(existing, observation)) {
+              sendJson(response, 202, { accepted: true, duplicate: true, id: observation.id });
+              return;
             }
             sendJson(response, 409, githubWebhookFailure(
               "OBSERVATION_ID_CONFLICT",
