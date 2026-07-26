@@ -17,7 +17,7 @@ const pricing = {
   longContextOutputMultiplier: 1.5,
 };
 
-test("dashboard includes a same-origin repository allocation view", async () => {
+test("estimate dashboard includes a same-origin repository allocation view", async () => {
   const directory = await mkdtemp(join(tmpdir(), "shadowbill-dashboard-repositories-"));
   const store = new JsonlEventStore(join(directory, "events.jsonl"));
   await store.append({
@@ -42,7 +42,7 @@ test("dashboard includes a same-origin repository allocation view", async () => 
   const url = `http://127.0.0.1:${port}`;
 
   try {
-    const htmlResponse = await fetch(`${url}/dashboard/`);
+    const htmlResponse = await fetch(`${url}/dashboard/estimates/`);
     const html = await htmlResponse.text();
     assert.equal(htmlResponse.status, 200);
     assert.equal(htmlResponse.headers.get("access-control-allow-origin"), null);
