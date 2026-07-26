@@ -36,12 +36,14 @@ test("repository identity variants report missing fields with stable paths", () 
   );
 });
 
-test("adapter schema identifiers reject local paths and credentials", async () => {
+test("adapter schema identifiers reject local paths, credentials, and invalid URI syntax", async () => {
   const policy = await fixture("renderprove");
   for (const schema of [
     "file:///home/operator/private/schema.json",
     "https://operator:secret@example.com/schema.json",
     "http://example.com/schema.json",
+    "https://schemas.example.com/schema file.json",
+    "urn:",
   ]) {
     assert.throws(
       () => validateRepositoryPolicy({
@@ -94,4 +96,6 @@ test("published schema mirrors the runtime URI allowlist", async () => {
   assert.doesNotMatch("file:///home/operator/private/schema.json", uriPattern);
   assert.doesNotMatch("http://example.com/schema.json", uriPattern);
   assert.doesNotMatch("https://operator:secret@example.com/schema.json", uriPattern);
+  assert.doesNotMatch("https://schemas.example.com/schema file.json", uriPattern);
+  assert.doesNotMatch("urn:", uriPattern);
 });
