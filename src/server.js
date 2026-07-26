@@ -176,7 +176,12 @@ function projectionError(error, command) {
   };
 }
 
-function historyError(command, code, message) {
+function historyError(command, code) {
+  const message = code === "HISTORY_REPORT_REGISTRY_UNAVAILABLE"
+    ? "Repository registry is unavailable."
+    : code === "HISTORY_REPORT_INVALID_QUERY" || code === "HISTORY_REPORT_INVALID_DAYS"
+      ? "History report query is invalid."
+      : "History report generation failed.";
   return {
     service: "proofwake",
     command,
@@ -299,14 +304,14 @@ export function createCollectorServer(options) {
       if (request.method === "GET" && (url.pathname === "/v1/failures" || url.pathname === "/v1/recoveries")) {
         const command = url.pathname === "/v1/failures" ? "failures" : "recoveries";
         if (!registryStore) {
-          sendJson(response, 503, historyError(command, "HISTORY_REPORT_REGISTRY_UNAVAILABLE", "Repository registry is unavailable."));
+          sendJson(response, 503, historyError(command, "HISTORY_REPORT_REGISTRY_UNAVAILABLE"));
           return;
         }
         let days;
         try {
           days = parseHistoryDays(url);
         } catch {
-          sendJson(response, 400, historyError(command, "HISTORY_REPORT_INVALID_QUERY", "History report query is invalid."));
+          sendJson(response, 400, historyError(command, "HISTORY_REPORT_INVALID_QUERY"));
           return;
         }
         try {
@@ -318,7 +323,7 @@ export function createCollectorServer(options) {
         } catch (error) {
           const code = typeof error?.code === "string" ? error.code : "HISTORY_REPORT_HTTP_FAILED";
           const status = code === "HISTORY_REPORT_INVALID_DAYS" ? 400 : 500;
-          sendJson(response, status, historyError(command, code, error instanceof Error ? error.message : String(error)));
+          sendJson(response, status, historyError(command, code));
         }
         return;
       }
