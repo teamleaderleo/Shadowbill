@@ -4,21 +4,37 @@ import { discloseProofwakeProjection } from "../src/projection-mcp-disclosure.js
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
+const OTHER_DIGEST = `sha256:${"c".repeat(64)}`;
+const THIRD_DIGEST = `sha256:${"d".repeat(64)}`;
+
+function evidence(uri, digest) {
+  return {
+    uri,
+    digest,
+    mediaType: "application/json",
+    producer: "renderprove",
+    schema: "renderprove.receipt.v1",
+    state: "verified",
+    disclosure: "restricted-reference",
+  };
+}
 
 test("MCP projection disclosure preserves evidence semantics while excluding local and content-derived detail", () => {
   const privatePath = "/private/worktree/.proofwake/receipt.json";
+  const hostileSource = `file:///private/source.json?path=${privatePath}`;
+  const arbitraryUrn = `urn:private:${privatePath}`;
   const projection = {
     service: "proofwake",
     command: "inspect",
     projectionVersion: 1,
-    sourceCursor: `sha256:${"c".repeat(64)}`,
+    sourceCursor: `sha256:${"e".repeat(64)}`,
     repository: { identity: "acme/private", label: "acme/private", value: { kind: "remote", id: "acme/private", provider: "github" } },
     repositoryState: "misconfigured",
     selectedRevision: REVISION,
     selectedRevisionSource: "explicit",
     configuration: {
       source: "committed",
-      fingerprint: `sha256:${"d".repeat(64)}`,
+      fingerprint: `sha256:${"f".repeat(64)}`,
       changedSinceEnrolment: false,
       problems: [{
         code: "REPOSITORY_POLICY_UNKNOWN_FIELD",
@@ -67,20 +83,17 @@ test("MCP projection disclosure preserves evidence semantics while excluding loc
       attempts: 2,
       reruns: 1,
       latest: {
-        source: "urn:proofwake:adapter:local-command",
+        source: hostileSource,
         id: "verify-passed",
         adapter: { name: "local-command", version: "1.0.0", trust: "local-operator" },
         relationships: { repository: "acme/private", revision: REVISION },
         coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
-        evidence: [{
-          uri: `file://${privatePath}`,
-          digest: DIGEST,
-          mediaType: "application/json",
-          producer: "renderprove",
-          schema: "renderprove.receipt.v1",
-          state: "verified",
-          disclosure: "restricted-reference",
-        }],
+        evidence: [
+          evidence(`file://${privatePath}`, DIGEST),
+          evidence(arbitraryUrn, OTHER_DIGEST),
+          evidence("https://example.invalid/public/receipt.json", THIRD_DIGEST),
+          evidence("urn:renderprove:receipt:public-run", `sha256:${"1".repeat(64)}`),
+        ],
       },
       recovery: {
         type: "same-revision-rerun",
@@ -101,10 +114,15 @@ test("MCP projection disclosure preserves evidence semantics while excluding loc
   assert.equal(disclosed.signals[0].attempts, 2);
   assert.equal(disclosed.signals[0].reruns, 1);
   assert.deepEqual(disclosed.signals[0].recovery, projection.signals[0].recovery);
+  assert.equal(disclosed.signals[0].latest.source, "urn:proofwake:adapter:local-command");
+  assert.equal(disclosed.signals[0].latest.adapter.name, "local-command");
   assert.equal(disclosed.signals[0].latest.adapter.trust, "local-operator");
   assert.equal(disclosed.signals[0].latest.coverage.state, "complete");
   assert.equal(disclosed.signals[0].latest.evidence[0].digest, DIGEST);
   assert.equal(disclosed.signals[0].latest.evidence[0].uri, `urn:proofwake:evidence:${DIGEST}`);
+  assert.equal(disclosed.signals[0].latest.evidence[1].uri, `urn:proofwake:evidence:${OTHER_DIGEST}`);
+  assert.equal(disclosed.signals[0].latest.evidence[2].uri, "https://example.invalid/public/receipt.json");
+  assert.equal(disclosed.signals[0].latest.evidence[3].uri, "urn:renderprove:receipt:public-run");
   assert.deepEqual(disclosed.policy.adapters[0], {
     name: "renderprove",
     type: "receipt-file",
@@ -116,15 +134,18 @@ test("MCP projection disclosure preserves evidence semantics while excluding loc
     message: "Repository policy is invalid.",
   }]);
   assert.equal(disclosed.attention.reason, "Repository policy is invalid.");
-  assert.equal(JSON.stringify(disclosed).includes(privatePath), false);
-  assert.equal(JSON.stringify(disclosed).includes("privateField"), false);
+  const serialized = JSON.stringify(disclosed);
+  assert.equal(serialized.includes(privatePath), false);
+  assert.equal(serialized.includes(hostileSource), false);
+  assert.equal(serialized.includes(arbitraryUrn), false);
+  assert.equal(serialized.includes("privateField"), false);
 });
 
 test("fleet projection errors retain stable codes with bounded attention text", () => {
   const privatePath = "/private/worktree";
   const projection = {
     projectionVersion: 1,
-    sourceCursor: `sha256:${"e".repeat(64)}`,
+    sourceCursor: `sha256:${"2".repeat(64)}`,
     repositories: [{
       repository: { identity: "acme/broken" },
       classification: "misconfigured",
