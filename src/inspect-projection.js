@@ -1,4 +1,15 @@
+import { createHash } from "node:crypto";
 import { buildRevisionProjection as buildRawRevisionProjection } from "./revision-projection.js";
+
+const ATTENTION_PRIORITY = [
+  "failing",
+  "unavailable",
+  "partial",
+  "stale",
+  "missing",
+  "warning",
+  "selection-unavailable",
+];
 
 function compareEvents(left, right) {
   return left.record.observedAt.localeCompare(right.record.observedAt) ||
@@ -50,11 +61,91 @@ function firstGreenTimeline(report) {
   };
 }
 
+function unavailableSignal(signal, reason) {
+  return {
+    ...signal,
+    selector: { available: false, reason },
+    state: "selection-unavailable",
+    reason,
+    attempts: 0,
+    reruns: 0,
+    workflowAttempts: [],
+    firstObservationAt: null,
+    firstPassingAt: null,
+    timeToPassingMs: null,
+    latest: null,
+    unresolvedFailures: [],
+    recovery: null,
+    ambiguousRecoveryCandidates: [],
+    history: [],
+    historyTruncated: false,
+  };
+}
+
+function enforceDefaultBranchAuthority(report) {
+  if (report.revision.defaultBranchConfidence !== "conventional-current") return;
+  const reason = "Default-branch selection requires an explicit local remote HEAD.";
+  report.signals = report.signals.map((signal) =>
+    signal.policy.subject === "revision" && signal.policy.appliesTo === "default-branch"
+      ? unavailableSignal(signal, reason)
+      : signal);
+  report.revision.defaultBranch = null;
+  report.revision.defaultBranchSelected = false;
+  report.revision.defaultBranchConfidence = "unavailable";
+}
+
+function projectionStatus(report) {
+  if (report.repositoryState === "dormant") return "grey";
+  if (report.repositoryState === "unobserved" && report.observationCount === 0) return "grey";
+  if (report.repositoryState === "misconfigured" || report.configuration.problems.length > 0) return "yellow";
+  const required = report.signals.filter((signal) => signal.policy.requirement === "required");
+  if (required.some((signal) => signal.state === "failing")) return "red";
+  if (required.length > 0 && required.every((signal) => signal.state === "passed")) return "green";
+  return "yellow";
+}
+
+function projectionAttention(report) {
+  const problem = report.configuration.problems[0];
+  if (problem) {
+    return { type: "configuration", reason: problem.message, signal: null, observation: null };
+  }
+  if (report.status === "grey") {
+    const reason = report.repositoryState === "dormant"
+      ? "Repository policy declares this repository dormant."
+      : "No accepted evidence has been observed for this repository.";
+    return { type: report.repositoryState, reason, signal: null, observation: null };
+  }
+  for (const state of ATTENTION_PRIORITY) {
+    const signal = report.signals.find((entry) => entry.policy.requirement === "required" && entry.state === state);
+    if (signal) return { type: state, reason: signal.reason, signal: signal.policy.kind, observation: signal.latest };
+  }
+  return null;
+}
+
+function contextualCursor(report) {
+  const payload = {
+    base: report.sourceCursor,
+    repositoryState: report.repositoryState,
+    revision: report.revision,
+    configuration: {
+      source: report.configuration.source,
+      fingerprint: report.configuration.fingerprint,
+      changedSinceEnrolment: report.configuration.changedSinceEnrolment,
+      problems: report.configuration.problems.map((problem) => ({ code: problem.code, path: problem.path ?? null })),
+    },
+  };
+  return `sha256:${createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex")}`;
+}
+
 export async function buildRevisionProjection(options) {
   const report = await buildRawRevisionProjection(options);
+  enforceDefaultBranchAuthority(report);
+  report.status = projectionStatus(report);
+  report.attention = projectionAttention(report);
   const timeline = firstGreenTimeline(report);
   report.firstGreenAt = timeline.firstGreenAt;
   report.timeToGreenMs = timeline.timeToGreenMs;
   report.timeToGreenConfidence = timeline.confidence;
+  report.sourceCursor = contextualCursor(report);
   return report;
 }
