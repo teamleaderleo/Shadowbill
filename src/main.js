@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { runIngestAdapterCommand } from "./adapter-cli.js";
+import { runDoctorCommand } from "./doctor-command.js";
 import { runFailuresCommand, runRecoveriesCommand } from "./history-report-cli.js";
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
@@ -42,7 +43,8 @@ Commands:
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
   mcp [--allow-writes]
   report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]
-  doctor [--json]
+  doctor [--registry PATH] [--data PATH] [--collector-token-file PATH]
+         [--pricing PATH] [--model MODEL] [--timezone IANA_NAME] [--json]
   ingest-git [--repo PATH]
   hook install [PATH]
 
@@ -52,6 +54,8 @@ Run launches one argument vector without a shell and records a bounded terminal 
 Native adapter ingestion validates declared external receipts and artifact digests before indexing.
 Inspect and fleet rebuild current evidence projections. Failures and recoveries report bounded
 policy-matched history from the registry and accepted ledger.
+Doctor checks the active ledger, optional estimate module, repository registry, enrolled
+checkouts, policies, and declared adapter receipt paths without changing them.
 
 Legacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`;
 }
@@ -199,6 +203,8 @@ if (command === undefined || command === "help" || command === "--help" || comma
   await runFailuresCommand(process.argv.slice(3));
 } else if (command === "recoveries") {
   await runRecoveriesCommand(process.argv.slice(3));
+} else if (command === "doctor") {
+  await runDoctorCommand(process.argv.slice(3));
 } else {
   await import("./cli.js");
 }
