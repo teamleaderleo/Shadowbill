@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadOrCreateCollectorToken } from "./auth.js";
 import { buildDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
@@ -12,16 +13,25 @@ import {
   resolveStorageIdentity,
   selectCompatibleEnvironment,
 } from "./identity.js";
-import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
+import { runProofwakeMcpStdioServer } from "./proofwake-mcp.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
+import { RepositoryRegistryStore } from "./repository-registry.js";
 import { createCollectorServer, listen } from "./server.js";
 import { JsonlEventStore } from "./store.js";
 
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+function pathArgument(name) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error(`${name} requires a path`);
+  return value;
 }
 
 function reportDays(value) {
@@ -271,7 +281,16 @@ async function main() {
 
   if (command === "mcp") {
     const allowWrites = process.argv.includes("--allow-writes") || mcpWritesEnvironment.value === "1";
-    await runShadowbillMcpStdioServer({ store, pricing, profile: DEFAULT_WORKING_PROFILE, timeZone, allowWrites });
+    const registryPath = resolve(pathArgument("--registry") ?? join(dirname(dataPath), "repositories.json"));
+    const registryStore = new RepositoryRegistryStore(registryPath);
+    await runProofwakeMcpStdioServer({
+      store,
+      registryStore,
+      pricing,
+      profile: DEFAULT_WORKING_PROFILE,
+      timeZone,
+      allowWrites,
+    });
     return;
   }
 
@@ -307,7 +326,7 @@ async function main() {
     return;
   }
 
-  console.log(`${PRODUCT_NAME}\n\nThe evidence trail behind every revision.\n\nCurrent commands:\n  status [--json]\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or PROOFWAKE_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or PROOFWAKE_COLLECTOR_TOKEN_FILE)\n  PROOFWAKE_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or PROOFWAKE_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or PROOFWAKE_TIMEZONE)\n  --allow-writes (or PROOFWAKE_MCP_ALLOW_WRITES=1)\n\nLegacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`);
+  console.log(`${PRODUCT_NAME}\n\nThe evidence trail behind every revision.\n\nCurrent commands:\n  status [--json]\n  serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]\n  mcp [--registry PATH] [--allow-writes]\n  report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]\n  doctor [--json]\n  ingest-git [--repo PATH]\n  hook install [PATH]\n\nOptions:\n  --data PATH\n  --registry PATH\n  --model gpt-5.6-sol\n  --pricing PATH\n  --github-secret SECRET (or PROOFWAKE_GITHUB_WEBHOOK_SECRET)\n  --collector-token-file PATH (or PROOFWAKE_COLLECTOR_TOKEN_FILE)\n  PROOFWAKE_COLLECTOR_TOKEN (direct token override)\n  --allowed-hosts HOST[,HOST...] (or PROOFWAKE_ALLOWED_HOSTS)\n  --timezone IANA_NAME (or PROOFWAKE_TIMEZONE)\n  --allow-writes (or PROOFWAKE_MCP_ALLOW_WRITES=1)\n\nLegacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`);
 }
 
 main().catch((error) => {
