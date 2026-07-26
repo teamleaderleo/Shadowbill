@@ -222,6 +222,9 @@ function validateReceiptPath(value, path) {
 function validateSchemaName(value, path) {
   string(value, path, { max: 256 });
   if (SLUG.test(value)) return value;
+  if (/\s/u.test(value)) {
+    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema identifiers must not contain whitespace.", path);
+  }
 
   let parsed;
   try {
@@ -229,8 +232,8 @@ function validateSchemaName(value, path) {
   } catch {
     fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token, HTTPS URL, or URN.", path);
   }
-  if (!SCHEMA_URI_PROTOCOLS.has(parsed.protocol) || parsed.username || parsed.password) {
-    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token, HTTPS URL, or URN without credentials.", path);
+  if (!SCHEMA_URI_PROTOCOLS.has(parsed.protocol) || parsed.username || parsed.password || (parsed.protocol === "urn:" && parsed.pathname.length === 0)) {
+    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token, HTTPS URL, or non-empty URN without credentials.", path);
   }
   return parsed.href;
 }
