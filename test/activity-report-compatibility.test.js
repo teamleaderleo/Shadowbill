@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ACTIVITY_OBSERVATION_TYPES } from "../src/activity-view.js";
 import { buildDailyReport } from "../src/estimate.js";
+import { observationFingerprint } from "../src/observation.js";
 import { buildRepositoryAllocationReport } from "../src/repositories.js";
 
 const REVISION = "a".repeat(40);
@@ -19,40 +20,43 @@ function observationRecord({ id, type, kind, status = "passed", facts, relations
   const repository = "acme/repo";
   const github = type.includes("github");
   const eventName = type === ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun ? "workflow_run" : null;
+  const observation = {
+    specversion: "1.0",
+    id: github ? `github-${eventName}-${id}` : id,
+    source: github ? "urn:proofwake:provider:github" : "urn:proofwake:adapter:git",
+    type,
+    subject: `repo:${repository}@sha:${REVISION}`,
+    time: "2026-07-26T13:00:00.000Z",
+    dataschema: "urn:proofwake:schema:observation:v1",
+    data: {
+      schemaVersion: 1,
+      adapter: {
+        name: github ? "github" : "git",
+        version: "1.0.0",
+        mappingVersion: 1,
+        trust: github ? "signed-provider" : "local-operator",
+        sourceSchema: "activity.test",
+        sourceSchemaVersion: "1",
+      },
+      kind,
+      status,
+      timeSource: github ? "provider" : "producer",
+      observedAt: "2026-07-26T13:00:00.000Z",
+      ingestedAt: "2026-07-26T13:00:01.000Z",
+      ...(durationMs === undefined ? {} : { durationMs }),
+      relationships: { repository, revision: REVISION, ...relationships },
+      facts: facts.map(([name, value]) => ({ name, value })),
+      evidence: [],
+      coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
+    },
+  };
   return {
     type: "proofwake_observation",
     id: `record-${id}`,
-    timestamp: "2026-07-26T13:00:01.000Z",
-    observation: {
-      specversion: "1.0",
-      id: github ? `github-${eventName}-${id}` : id,
-      source: github ? "urn:proofwake:provider:github" : "urn:proofwake:adapter:git",
-      type,
-      subject: `repo:${repository}@sha:${REVISION}`,
-      time: "2026-07-26T13:00:00.000Z",
-      dataschema: "urn:proofwake:schema:observation:v1",
-      data: {
-        schemaVersion: 1,
-        adapter: {
-          name: github ? "github" : "git",
-          version: "1.0.0",
-          mappingVersion: 1,
-          trust: github ? "signed-provider" : "local-operator",
-          sourceSchema: "activity.test",
-          sourceSchemaVersion: "1",
-        },
-        kind,
-        status,
-        timeSource: github ? "provider" : "producer",
-        observedAt: "2026-07-26T13:00:00.000Z",
-        ingestedAt: "2026-07-26T13:00:01.000Z",
-        ...(durationMs === undefined ? {} : { durationMs }),
-        relationships: { repository, revision: REVISION, ...relationships },
-        facts: facts.map(([name, value]) => ({ name, value })),
-        evidence: [],
-        coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
-      },
-    },
+    timestamp: observation.data.ingestedAt,
+    requestFingerprint: observationFingerprint(observation),
+    observationIdentity: { source: observation.source, id: observation.id },
+    observation,
   };
 }
 
