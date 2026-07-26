@@ -18,6 +18,10 @@ test("observation CLI rejects a deterministic mutation corpus", async () => {
   assert.equal(result.status, "passed");
   assert.equal(result.iterations, 80);
   assert.equal(result.seed, 20260726);
+  assert.equal(result.operatorCount, 20);
+  assert.equal(result.exercisedOperators, result.operatorCount);
+  assert.equal(result.operatorHits.length, result.operatorCount);
+  assert.equal(result.operatorHits.every((count) => Number.isSafeInteger(count) && count > 0), true);
   assert.equal(result.distinctErrorCodes >= 8, true);
   assert.equal(Object.keys(result.errors).every((code) => code.startsWith("OBSERVATION_")), true);
 });
