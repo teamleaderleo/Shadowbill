@@ -91,28 +91,39 @@ test("fleet home includes an accessible no-script fallback", async () => {
   }
 });
 
-test("projection endpoints report a stable registry-unavailable response", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "proofwake-fleet-no-registry-"));
+test("server discovers an empty registry beside the active ledger", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "proofwake-fleet-empty-registry-"));
   try {
     await server({ store: new JsonlEventStore(join(directory, "events.jsonl")) }, async (port) => {
-      for (const path of ["/v1/fleet", "/v1/revision-evidence?repository=acme/private"]) {
-        const response = await http(port, path);
-        assert.equal(response.status, 503);
-        assert.equal(response.headers["access-control-allow-origin"], undefined);
-        const body = JSON.parse(response.text);
-        assert.equal(body.status, "error");
-        assert.equal(body.error.code, "PROJECTION_REGISTRY_UNAVAILABLE");
-      }
+      const response = await http(port, "/v1/fleet");
+      assert.equal(response.status, 200);
+      const body = JSON.parse(response.text);
+      assert.equal(body.summary.total, 0);
+      assert.deepEqual(body.repositories, []);
     });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("fleet and revision HTTP responses exclude private checkout and registry paths", async () => {
+test("projection endpoints report a stable registry-unavailable response without a storage path", async () => {
+  const store = { readAll: async () => [] };
+  await server({ store, registryStore: null }, async (port) => {
+    for (const path of ["/v1/fleet", "/v1/revision-evidence?repository=acme/private"]) {
+      const response = await http(port, path);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers["access-control-allow-origin"], undefined);
+      const body = JSON.parse(response.text);
+      assert.equal(body.status, "error");
+      assert.equal(body.error.code, "PROJECTION_REGISTRY_UNAVAILABLE");
+    }
+  });
+});
+
+test("automatically discovered fleet responses exclude private checkout and storage paths", async () => {
   const directory = await mkdtemp(join(tmpdir(), "proofwake-fleet-private-paths-"));
   const root = join(directory, "private-checkout");
-  const registryPath = join(directory, "private-registry.json");
+  const registryPath = join(directory, "repositories.json");
   const dataPath = join(directory, "private-events.jsonl");
   try {
     await mkdir(root);
@@ -129,11 +140,14 @@ test("fleet and revision HTTP responses exclude private checkout and registry pa
     await registryStore.enroll(await inspectRepositoryEnrollment(root));
     const store = new JsonlEventStore(dataPath);
 
-    await server({ store, registryStore }, async (port) => {
-      for (const path of ["/v1/fleet", "/v1/revision-evidence?repository=acme/private"]) {
-        const response = await http(port, path);
-        assert.equal(response.status, 200);
-        for (const privateValue of [directory, root, registryPath, dataPath, "private-checkout", "private-registry.json"]) {
+    await server({ store }, async (port) => {
+      const fleet = await http(port, "/v1/fleet");
+      assert.equal(fleet.status, 200);
+      assert.equal(JSON.parse(fleet.text).summary.total, 1);
+      const revision = await http(port, "/v1/revision-evidence?repository=acme/private");
+      assert.equal(revision.status, 200);
+      for (const response of [fleet, revision]) {
+        for (const privateValue of [directory, root, registryPath, dataPath, "private-checkout", "private-events.jsonl"]) {
           assert.equal(response.text.includes(privateValue), false, privateValue);
         }
       }
