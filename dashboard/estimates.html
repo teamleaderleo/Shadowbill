@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Proofwake — Shadowbill Estimates</title>
+  <link rel="stylesheet" href="/dashboard/dashboard.css">
+  <script src="/dashboard/dashboard.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">Optional Shadowbill estimate module</p>
+      <h1>Proofwake</h1>
+      <p id="range-caption" class="subtitle">Loading rolling report…</p>
+    </div>
+    <div class="status-wrap">
+      <a href="/dashboard/" class="secondary-link">Fleet console</a>
+      <span id="status-dot" class="status-dot" aria-hidden="true"></span>
+      <span id="status-text">Connecting</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls" aria-label="Report controls">
+      <div class="range-buttons" role="group" aria-label="Preset ranges">
+        <button type="button" data-days="7">7 days</button>
+        <button type="button" data-days="30" class="active">30 days</button>
+        <button type="button" data-days="90">90 days</button>
+        <button type="button" data-days="365">365 days</button>
+      </div>
+      <form id="custom-range" class="custom-range">
+        <label>
+          <span>Days</span>
+          <input id="days-input" name="days" type="number" min="1" max="365" value="30" inputmode="numeric">
+        </label>
+        <label>
+          <span>End date</span>
+          <input id="end-date-input" name="endDate" type="date">
+        </label>
+        <label>
+          <span>Timezone</span>
+          <input id="timezone-input" name="timezone" type="text" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="submit" class="primary">Refresh</button>
+      </form>
+    </section>
+
+    <section id="error-panel" class="error-panel" hidden aria-live="polite"></section>
+
+    <section class="metrics-grid" aria-label="Primary metrics">
+      <article class="metric-card hero-card">
+        <span class="metric-label">Working estimate</span>
+        <strong id="working-estimate">—</strong>
+        <span id="average-cost" class="metric-detail">— per active day</span>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">Chat turns</span>
+        <strong id="chat-turns">—</strong>
+        <span id="capture-detail" class="metric-detail">— captures</span>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">Visible tokens</span>
+        <strong id="visible-tokens">—</strong>
+        <span id="token-split" class="metric-detail">— input · — output</span>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">Retained code tokens</span>
+        <strong id="code-tokens">—</strong>
+        <span id="code-floor" class="metric-detail">— delivered-code floor</span>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">Active days</span>
+        <strong id="active-days">—</strong>
+        <span id="calendar-days" class="metric-detail">— calendar days</span>
+      </article>
+      <article class="metric-card">
+        <span class="metric-label">Conversations</span>
+        <strong id="conversations">—</strong>
+        <span id="repositories" class="metric-detail">— repositories</span>
+      </article>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Daily series</p>
+          <h2>Estimated cost and chat volume</h2>
+        </div>
+        <div class="legend" aria-label="Chart legend">
+          <span><i class="legend-cost"></i>Working cost</span>
+          <span><i class="legend-turns"></i>Chat turns</span>
+        </div>
+      </div>
+      <div id="chart-empty" class="empty-state" hidden>No activity in this range.</div>
+      <svg id="daily-chart" class="daily-chart" viewBox="0 0 1200 360" role="img" aria-labelledby="chart-title chart-description">
+        <title id="chart-title">Daily Shadowbill estimate activity</title>
+        <desc id="chart-description">Bars show daily working cost. The line shows chat-turn volume.</desc>
+      </svg>
+    </section>
+
+    <section class="outcome-grid" aria-label="Delivery outcomes">
+      <article class="outcome-card"><span>Commits</span><strong id="commits">—</strong><small id="cost-per-commit">— per commit</small></article>
+      <article class="outcome-card"><span>Merged PRs</span><strong id="merged-prs">—</strong><small id="cost-per-pr">— per merged PR</small></article>
+      <article class="outcome-card"><span>CI successes</span><strong id="ci-successes">—</strong><small id="cost-per-ci">— per success</small></article>
+      <article class="outcome-card"><span>Deployments</span><strong id="deployments">—</strong><small id="cost-per-deployment">— per deployment</small></article>
+      <article class="outcome-card peak-card"><span>Peak chat day</span><strong id="peak-chat-day">—</strong><small id="peak-chat-detail">—</small></article>
+      <article class="outcome-card peak-card"><span>Peak cost day</span><strong id="peak-cost-day">—</strong><small id="peak-cost-detail">—</small></article>
+    </section>
+
+    <section class="panel repository-panel" aria-labelledby="repository-heading">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Delivery correlation</p><h2 id="repository-heading">Repository allocation</h2></div>
+        <p id="repository-basis" class="table-note">Loading allocation basis…</p>
+      </div>
+      <div class="allocation-grid" aria-label="Repository allocation summary">
+        <article class="allocation-card"><span>Allocated estimate</span><strong id="allocated-cost">—</strong><small id="allocated-days">— allocation days</small></article>
+        <article class="allocation-card warning-card"><span>Unallocated estimate</span><strong id="unallocated-cost">—</strong><small id="unallocated-days">— days without retained-code evidence</small></article>
+        <article class="allocation-card"><span>Allocation coverage</span><strong id="allocation-coverage">—</strong><small id="allocation-repositories">— repositories</small></article>
+      </div>
+      <p id="allocation-note" class="allocation-note">Repository cost is a heuristic correlation, not causal attribution.</p>
+      <div id="repository-empty" class="empty-state compact-empty" hidden>No repository activity in this range.</div>
+      <div id="repository-table-wrap" class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Repository</th><th scope="col">Allocated cost</th><th scope="col">Retained tokens</th><th scope="col">Commits</th><th scope="col">Merged PRs</th><th scope="col">CI</th><th scope="col">Deployments</th><th scope="col">Cost / commit</th></tr></thead>
+          <tbody id="repository-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Ledger view</p><h2>Daily detail</h2></div><p class="table-note">Latest capture per logical assistant turn</p></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">Date</th><th scope="col">Working cost</th><th scope="col">Turns</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Commits</th><th scope="col">Merged PRs</th><th scope="col">CI</th><th scope="col">Deployments</th></tr></thead>
+          <tbody id="daily-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Data stays on this loopback collector.</span><span id="updated-at">—</span></footer>
+</body>
+</html>
