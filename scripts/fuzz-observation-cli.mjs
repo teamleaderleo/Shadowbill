@@ -208,9 +208,17 @@ try {
     codes.set(code, (codes.get(code) ?? 0) + 1);
   }
 
-  const exercisedOperators = operatorHits.filter((count) => count > 0).length;
-  if (iterations >= mutations.length && exercisedOperators !== mutations.length) {
-    throw new Error(`only ${exercisedOperators}/${mutations.length} mutation operators were exercised`);
+  const selectedOperatorIndexes = operatorHits
+    .map((count, index) => ({ count, index }))
+    .filter(({ count }) => count > 0)
+    .map(({ index }) => index);
+  const missingOperatorIndexes = operatorHits
+    .map((count, index) => ({ count, index }))
+    .filter(({ count }) => count === 0)
+    .map(({ index }) => index);
+  const operatorsExercised = selectedOperatorIndexes.length;
+  if (missingOperatorIndexes.length > 0) {
+    throw new Error(`missing mutation operators: ${missingOperatorIndexes.join(",")}`);
   }
 
   process.stdout.write(`${JSON.stringify({
@@ -219,8 +227,12 @@ try {
     status: "passed",
     iterations,
     seed,
+    mutationOperators: mutations.length,
+    operatorsExercised,
+    selectedOperatorIndexes,
+    missingOperatorIndexes,
     operatorCount: mutations.length,
-    exercisedOperators,
+    exercisedOperators: operatorsExercised,
     operatorHits,
     distinctErrorCodes: codes.size,
     errors: Object.fromEntries([...codes].sort()),
