@@ -41,7 +41,7 @@ Commands:
   recoveries [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
-  mcp [--allow-writes]
+  mcp [--registry PATH] [--allow-writes]
   report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]
   doctor [--registry PATH] [--data PATH] [--collector-token-file PATH]
          [--pricing PATH] [--model MODEL] [--timezone IANA_NAME] [--json]
