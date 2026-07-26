@@ -1,5 +1,6 @@
 import {
   canonicalRepository,
+  contentDigest,
   createActivityObservation,
   fullRevision,
   mappedTimes,
@@ -20,6 +21,11 @@ const ADAPTER = Object.freeze({
 function optionalCount(event, key, factName, code) {
   const value = nonNegativeInteger(event[key], code, key, { optional: true });
   return value === undefined ? null : { name: factName, value };
+}
+
+function commitObservationId(repository, revision) {
+  const digest = contentDigest({ repository, revision }).slice("sha256:".length);
+  return `git-commit-${digest}`;
 }
 
 /**
@@ -53,7 +59,7 @@ export function mapGitCommitObservation(event, options = {}) {
   ].filter(Boolean);
 
   return createActivityObservation({
-    id: `git-commit-${revision}`,
+    id: commitObservationId(repository, revision),
     source: "urn:proofwake:adapter:git",
     type: "dev.proofwake.git.commit.v1",
     subject: `repo:${repository}@sha:${revision}`,
