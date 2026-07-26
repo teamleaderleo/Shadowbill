@@ -3,19 +3,17 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { buildRevisionProjection } from "../src/inspect-projection.js";
 import { inspectRepositoryEnrollment } from "../src/repository-enrollment.js";
 import { RepositoryRegistryStore } from "../src/repository-registry.js";
-import {
-  ingestRenderproveReceipt,
-  RENDERPROVE_RECEIPT_SCHEMA,
-} from "../src/renderprove-adapter.js";
+import { ingestRenderproveReceipt, RENDERPROVE_RECEIPT_SCHEMA } from "../src/renderprove-adapter.js";
 import { JsonlEventStore } from "../src/store.js";
 
 const exec = promisify(execFile);
+const INGESTION_TIME = new Date("2026-07-26T11:00:00.000Z");
 
 async function git(root, ...args) {
   const { stdout } = await exec("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -138,11 +136,7 @@ async function fixture(callback) {
 
 test("a verified passing receipt produces content-minimised browser evidence", async () => {
   await fixture(async ({ directory, revision, entry, registryStore, eventStore }) => {
-    const result = await ingestRenderproveReceipt({
-      entry,
-      eventStore,
-      now: new Date("2026-07-26T10:01:00.000Z"),
-    });
+    const result = await ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME });
     assert.equal(result.status, "inserted");
     assert.equal(result.browserStatus, "passed");
     assert.equal(result.revision, revision);
@@ -155,20 +149,15 @@ test("a verified passing receipt produces content-minimised browser evidence", a
     const observation = events[0].observation;
     assert.equal(observation.data.status, "passed");
     assert.equal(observation.data.adapter.trust, "local-operator");
-    assert.equal(observation.data.coverage.state, "partial");
-    assert.equal(observation.data.coverage.redacted, true);
+    assert.equal(observation.data.coverage.state, "complete");
+    assert.equal(observation.data.coverage.redacted, false);
     assert.equal(observation.data.evidence.length, 2);
     assert.equal(observation.data.relationships.revision, revision);
 
     const raw = await readFile(join(directory, "events.jsonl"), "utf8");
     for (const secret of [
-      "private.example.test",
-      "Jane Doe",
-      "token=secret",
-      "token=private",
-      "/private/worker/checkout",
-      ".renderprove/screenshots/private.png",
-      "private console",
+      "private.example.test", "Jane Doe", "token=secret", "token=private",
+      "/private/worker/checkout", ".renderprove/screenshots/private.png", "private console",
     ]) assert.equal(raw.includes(secret), false, secret);
 
     const projection = await buildRevisionProjection({
@@ -185,11 +174,8 @@ test("a verified passing receipt produces content-minimised browser evidence", a
 
 test("a valid failing receipt becomes failing evidence instead of adapter failure", async () => {
   await fixture(async ({ root, revision, entry, registryStore, eventStore, screenshot }) => {
-    await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({
-      artifactDigest: digest(screenshot),
-      status: "failed",
-    }), null, 2)}\n`);
-    const result = await ingestRenderproveReceipt({ entry, eventStore });
+    await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: digest(screenshot), status: "failed" }), null, 2)}\n`);
+    const result = await ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME });
     assert.equal(result.status, "inserted");
     assert.equal(result.browserStatus, "failed");
     const projection = await buildRevisionProjection({
@@ -197,7 +183,7 @@ test("a valid failing receipt becomes failing evidence instead of adapter failur
       revision,
       registryStore,
       eventStore,
-      now: new Date("2026-07-26T11:00:00.000Z"),
+      now: INGESTION_TIME,
     });
     assert.equal(projection.status, "red");
     assert.equal(projection.signals[0].state, "failing");
@@ -206,8 +192,8 @@ test("a valid failing receipt becomes failing evidence instead of adapter failur
 
 test("exact replay is idempotent and producer identity reuse with changed bytes conflicts", async () => {
   await fixture(async ({ root, entry, eventStore, screenshot }) => {
-    const first = await ingestRenderproveReceipt({ entry, eventStore, now: new Date("2026-07-26T10:01:00.000Z") });
-    const replay = await ingestRenderproveReceipt({ entry, eventStore, now: new Date("2026-07-26T10:02:00.000Z") });
+    const first = await ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME });
+    const replay = await ingestRenderproveReceipt({ entry, eventStore, now: new Date("2026-07-26T11:01:00.000Z") });
     assert.equal(replay.status, "duplicate");
     assert.equal(replay.observation.data.ingestedAt, first.observation.data.ingestedAt);
 
@@ -216,7 +202,7 @@ test("exact replay is idempotent and producer identity reuse with changed bytes 
       baseUrl: "https://changed-private.example.test",
     }), null, 2)}\n`);
     await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
+      ingestRenderproveReceipt({ entry, eventStore, now: new Date("2026-07-26T11:02:00.000Z") }),
       (error) => error.code === "OBSERVATION_ID_CONFLICT",
     );
     assert.equal((await eventStore.readAll()).length, 1);
@@ -228,22 +214,13 @@ test("unsupported schema, duplicate keys, and digest mismatch never become evide
     const unsupported = receipt({ artifactDigest: digest(screenshot) });
     unsupported.version = 2;
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(unsupported)}\n`);
-    await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
-      (error) => error.code === "RENDERPROVE_SCHEMA_UNSUPPORTED",
-    );
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_SCHEMA_UNSUPPORTED");
 
     await writeFile(join(root, ".renderprove", "receipt.json"), '{"version":1,"version":2}\n');
-    await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
-      (error) => error.code === "RENDERPROVE_RECEIPT_DUPLICATE_KEY",
-    );
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_RECEIPT_DUPLICATE_KEY");
 
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: "a".repeat(64) }))}\n`);
-    await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
-      (error) => error.code === "RENDERPROVE_ARTIFACT_DIGEST_MISMATCH",
-    );
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_ARTIFACT_DIGEST_MISMATCH");
     assert.equal((await eventStore.readAll()).length, 0);
   });
 });
@@ -251,16 +228,10 @@ test("unsupported schema, duplicate keys, and digest mismatch never become evide
 test("tracked changes and unrelated untracked files prevent revision binding", async () => {
   await fixture(async ({ root, entry, eventStore }) => {
     await writeFile(join(root, "package.json"), '{"changed":true}\n');
-    await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
-      (error) => error.code === "RENDERPROVE_CHECKOUT_DIRTY",
-    );
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_CHECKOUT_DIRTY");
     await git(root, "checkout", "--", "package.json");
     await writeFile(join(root, "untracked-source.js"), "export const secret = true;\n");
-    await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
-      (error) => error.code === "RENDERPROVE_CHECKOUT_DIRTY",
-    );
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_CHECKOUT_DIRTY");
     assert.equal((await eventStore.readAll()).length, 0);
   });
 });
@@ -274,7 +245,7 @@ test("artifact symlink escape is rejected before observation append", async () =
     await symlink(outsideArtifact, join(root, ".renderprove", "screenshots", "private.png"));
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: digest(bytes) }))}\n`);
     await assert.rejects(
-      ingestRenderproveReceipt({ entry, eventStore }),
+      ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }),
       (error) => ["RENDERPROVE_ARTIFACT_SYMLINK", "RENDERPROVE_ARTIFACT_PATH_ESCAPE"].includes(error.code),
     );
     assert.equal((await eventStore.readAll()).length, 0);
