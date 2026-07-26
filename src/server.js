@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { dirname, join } from "node:path";
 import { URL } from "node:url";
 import { verifyBearerAuthorization } from "./auth.js";
 import { dashboardResponse, isDashboardPath } from "./dashboard.js";
@@ -9,6 +10,7 @@ import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http
 import { buildRevisionProjection } from "./inspect-projection.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
+import { RepositoryRegistryStore } from "./repository-registry.js";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -158,8 +160,15 @@ function projectionError(error, command) {
   };
 }
 
+function resolveRegistryStore(options) {
+  if (options.registryStore !== undefined) return options.registryStore;
+  if (typeof options.store?.path !== "string") return null;
+  return new RepositoryRegistryStore(join(dirname(options.store.path), "repositories.json"));
+}
+
 export function createCollectorServer(options) {
   const allowedHosts = normalizeAllowedHosts(options.allowedHosts);
+  const registryStore = resolveRegistryStore(options);
 
   return createServer(async (request, response) => {
     let routeHeaders = {};
@@ -193,7 +202,7 @@ export function createCollectorServer(options) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/fleet") {
-        if (!options.registryStore) {
+        if (!registryStore) {
           sendJson(response, 503, {
             service: "proofwake",
             command: "fleet",
@@ -204,7 +213,7 @@ export function createCollectorServer(options) {
         }
         try {
           const report = await buildFleetProjection({
-            registryStore: options.registryStore,
+            registryStore,
             eventStore: options.store,
             now: new Date(),
           });
@@ -217,7 +226,7 @@ export function createCollectorServer(options) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/revision-evidence") {
-        if (!options.registryStore) {
+        if (!registryStore) {
           sendJson(response, 503, {
             service: "proofwake",
             command: "inspect",
@@ -250,7 +259,7 @@ export function createCollectorServer(options) {
           const report = await buildRevisionProjection({
             repository,
             revision,
-            registryStore: options.registryStore,
+            registryStore,
             eventStore: options.store,
             now: new Date(),
           });
@@ -344,7 +353,7 @@ export function createCollectorServer(options) {
         const report = group === "repository"
           ? buildRepositoryAllocationReport(events, date, days, options.pricing, options.profile, timeZone)
           : days === 1
-            ? buildDailyReport(events, date, options.pricing, options.profile, timeZone)
+            ? buildDailyReport(events, date, pricing, options.profile, timeZone)
             : buildRangeReport(events, date, days, options.pricing, options.profile, timeZone);
         sendJson(response, 200, report);
         return;
