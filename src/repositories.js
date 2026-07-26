@@ -1,3 +1,4 @@
+import { buildActivityReportView } from "./activity-view.js";
 import { dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 
@@ -89,9 +90,10 @@ export function buildRepositoryAllocationReport(
   workingProfile = DEFAULT_WORKING_PROFILE,
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ) {
+  const activityEvents = buildActivityReportView(events);
   const dates = calendarDateRange(endDate, days);
   const dateSet = new Set(dates);
-  const range = buildRangeReport(events, endDate, days, pricing, workingProfile, timeZone);
+  const range = buildRangeReport(activityEvents, endDate, days, pricing, workingProfile, timeZone);
   const repositories = new Map();
   const retainedTokensByDay = new Map(dates.map((date) => [date, new Map()]));
 
@@ -104,7 +106,7 @@ export function buildRepositoryAllocationReport(
     return state;
   };
 
-  for (const event of events) {
+  for (const event of activityEvents) {
     if (!("repository" in event) || typeof event.repository !== "string" || event.repository.length === 0) continue;
     const date = dateInTimeZone(event.timestamp, timeZone);
     if (!dateSet.has(date)) continue;
