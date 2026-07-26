@@ -31,23 +31,16 @@ async function readLedger(path) {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const jsonLine = line.endsWith("\r") ? line.slice(0, -1) : line;
     const lineStart = consumedCharacters;
-    consumedCharacters += line.length + (index < lines.length - 1 || endsWithNewline ? 1 : 0);
-    if (jsonLine.length === 0) continue;
+    consumedCharacters += Buffer.byteLength(line, "utf8") + 1;
+    if (line.trim().length === 0) continue;
     try {
-      events.push(JSON.parse(jsonLine));
+      events.push(JSON.parse(line));
     } catch (error) {
-      const isTrailingPartial = index === lines.length - 1 && !endsWithNewline;
-      if (isTrailingPartial) {
-        return {
-          raw,
-          events,
-          trailingPartialStart: Buffer.byteLength(raw.slice(0, lineStart), "utf8"),
-          needsSeparator: false,
-        };
+      if (index === lines.length - 1 && !endsWithNewline) {
+        return { raw, events, trailingPartialStart: lineStart, needsSeparator: false };
       }
-      throw new Error(`Invalid JSONL at line ${index + 1}: ${String(error)}`);
+      throw new Error(`Invalid JSONL event at line ${index + 1}: ${error.message}`);
     }
   }
 
@@ -59,15 +52,44 @@ async function readLedger(path) {
   };
 }
 
-async function syncAppend(path, content) {
-  const handle = await open(path, "a", 0o600);
-  try {
-    await chmod(path, 0o600);
-    await handle.writeFile(content, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
+function findEventById(events, id) {
+  return events.find((entry) => entry?.id === id);
+}
+
+function stripIdempotentVolatileFields(event) {
+  if (!event || typeof event !== "object") return event;
+  if (event.type !== "proofwake_observation" || !event.observation?.data) return event;
+  const observation = { ...event.observation };
+  const data = { ...observation.data };
+  if (data.adapter && typeof data.adapter === "object") {
+    data.adapter = { ...data.adapter };
+    delete data.adapter.secretSource;
   }
+  delete data.ingestedAt;
+  observation.data = data;
+  return { ...event, observation };
+}
+
+function persistedEventFingerprint(event) {
+  const copy = { ...stripIdempotentVolatileFields(event) };
+  delete copy.timestamp;
+  return JSON.stringify(copy);
+}
+
+function idempotentEquivalent(left, right) {
+  return persistedEventFingerprint(left) === persistedEventFingerprint(right);
+}
+
+function preparePersistedEvent(event, existing) {
+  if (!existing || existing.type !== "proofwake_observation" || event.type !== "proofwake_observation") return event;
+  return {
+    ...stripIdempotentVolatileFields(event),
+    timestamp: existing.timestamp,
+  };
+}
+
+function sourceObservation(event) {
+  return event?.type === "proofwake_observation" ? event.observation : undefined;
 }
 
 export class EventIdConflictError extends Error {
@@ -76,6 +98,17 @@ export class EventIdConflictError extends Error {
     this.name = "EventIdConflictError";
     this.code = "EVENT_ID_CONFLICT";
     this.id = id;
+  }
+}
+
+async function syncAppend(path, content) {
+  const handle = await open(path, "a", 0o600);
+  try {
+    await chmod(path, 0o600);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -135,15 +168,9 @@ export class JsonlEventStore {
 
   async #repairTrailingPartial(ledger) {
     if (ledger.trailingPartialStart === null) return;
-    const rawBytes = Buffer.from(ledger.raw, "utf8");
-    const validPrefix = rawBytes.subarray(0, ledger.trailingPartialStart);
-    const partial = rawBytes.subarray(ledger.trailingPartialStart);
-    const recovery = JSON.stringify({
-      recoveredAt: new Date().toISOString(),
-      bytesBase64: partial.toString("base64"),
-    });
-    await syncAppend(this.recoveryPath, `${recovery}\n`);
-    await truncate(this.path, validPrefix.length);
+    const suffix = ledger.raw.slice(ledger.trailingPartialStart);
+    if (suffix.length > 0) await syncAppend(this.recoveryPath, suffix);
+    await truncate(this.path, ledger.trailingPartialStart);
   }
 
   #enqueueAppend(event, requestFingerprint) {
@@ -151,17 +178,18 @@ export class JsonlEventStore {
       const release = await this.#acquireLock();
       try {
         const ledger = await readLedger(this.path);
-        const existing = ledger.events.find((value) => value.id === event.id);
+        const existing = findEventById(ledger.events, event.id);
         if (existing) {
           if (requestFingerprint === undefined) return false;
-          if (existing.requestFingerprint === requestFingerprint) {
-            return { status: "duplicate", event: existing };
+          if (existing.requestFingerprint === requestFingerprint && idempotentEquivalent(existing, event)) {
+            return { status: "duplicate", event: { ...existing, observation: sourceObservation(event) ?? existing.observation } };
           }
           throw new EventIdConflictError(event.id);
         }
         await this.#repairTrailingPartial(ledger);
         const separator = ledger.trailingPartialStart === null && ledger.needsSeparator ? "\n" : "";
-        await syncAppend(this.path, `${separator}${JSON.stringify(event)}\n`);
+        const persisted = preparePersistedEvent(event, ledger.events.at(-1));
+        await syncAppend(this.path, `${separator}${JSON.stringify(persisted)}\n`);
         return requestFingerprint === undefined ? true : { status: "inserted", event };
       } finally {
         await release();
