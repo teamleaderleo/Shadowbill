@@ -264,7 +264,6 @@ async function callEvidenceTool(name, args, options, registryStore) {
 export function createProofwakeMcpSession(options) {
   const base = createShadowbillMcpSession(options);
   const registryStore = resolveRegistryStore(options);
-  let initialized = false;
 
   return {
     async handle(message) {
@@ -275,7 +274,6 @@ export function createProofwakeMcpSession(options) {
       if (message.method === "initialize") {
         const response = await base.handle(message);
         if (response?.result) {
-          initialized = true;
           response.result.serverInfo = { name: "proofwake", version: SERVER_VERSION };
           response.result.instructions = "Use proofwake_fleet_status for fleet attention, proofwake_repository_status or proofwake_revision_evidence for exact signal evidence, and proofwake_recent_failures or proofwake_recovery_report for bounded history. Shadowbill estimate tools remain optional secondary reports. Aggregate writes appear only with explicit write access.";
         }
@@ -289,16 +287,9 @@ export function createProofwakeMcpSession(options) {
       }
 
       if (message.method === "tools/call" && isObject(message.params) && TOOL_NAMES.has(message.params.name)) {
-        const isRequest = Object.hasOwn(message, "id");
-        if (!isRequest) return null;
-        if (!validRequestId(message.id)) return rpcError(null, -32600, "Invalid Request ID");
-        if (!initialized) return rpcError(message.id, -32002, "Server not initialized");
-        if (message.params.arguments !== undefined && !isObject(message.params.arguments)) {
-          return rpcError(message.id, -32602, "Invalid tools/call parameters");
-        }
-        if (message.params.task !== undefined) {
-          return rpcError(message.id, -32601, "Task-augmented tool calls are unsupported");
-        }
+        const validation = await base.handle(message);
+        if (validation === null) return null;
+        if (validation.error?.code !== -32601 || validation.error?.message !== "Tool not found") return validation;
         const result = await callEvidenceTool(message.params.name, message.params.arguments, options, registryStore);
         return rpcResult(message.id, result);
       }
