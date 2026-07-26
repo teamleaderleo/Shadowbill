@@ -7,8 +7,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { promisify } from "node:util";
+import { DEFAULT_WORKING_PROFILE } from "../src/estimate.js";
 import { inspectRepositoryEnrollment } from "../src/repository-enrollment.js";
-import { loadPricing, defaultProfile } from "../src/pricing.js";
+import { loadPricingCatalog } from "../src/pricing.js";
 import { RepositoryRegistryStore } from "../src/repository-registry.js";
 import { createCollectorServer, listen } from "../src/server.js";
 import { JsonlEventStore } from "../src/store.js";
@@ -38,10 +39,10 @@ async function http(port, path) {
 }
 
 async function server(options, callback) {
-  const pricing = await loadPricing(new URL("../pricing/default.json", import.meta.url));
+  const catalog = await loadPricingCatalog();
   const instance = createCollectorServer({
-    pricing,
-    profile: defaultProfile(pricing, "gpt-5.4"),
+    pricing: catalog.models["gpt-5.6-sol"],
+    profile: DEFAULT_WORKING_PROFILE,
     collectorToken: "fleet-review-token",
     timeZone: "UTC",
     ...options,
