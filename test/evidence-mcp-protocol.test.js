@@ -15,7 +15,7 @@ function initialize() {
   };
 }
 
-test("evidence tools reuse compatibility tools/call protocol validation", async () => {
+test("evidence tools reuse compatibility tools/call validation and extension metadata", async () => {
   const session = createProofwakeMcpSession({
     store: { readAll: async () => [] },
     registryStore: null,
@@ -26,17 +26,18 @@ test("evidence tools reuse compatibility tools/call protocol validation", async 
   });
   await session.handle(initialize());
 
-  const unknownField = await session.handle({
+  const extensionMetadata = await session.handle({
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
     params: {
       name: "proofwake_fleet_status",
       arguments: {},
-      unexpected: true,
+      _meta: { progressToken: "test" },
     },
   });
-  assert.equal(unknownField.error.code, -32602);
+  assert.equal(extensionMetadata.result.isError, true);
+  assert.equal(extensionMetadata.result.structuredContent.error.code, "PROOFWAKE_REGISTRY_UNAVAILABLE");
 
   const invalidArguments = await session.handle({
     jsonrpc: "2.0",
