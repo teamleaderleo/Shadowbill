@@ -1,3 +1,5 @@
+import { buildActivityReportView } from "./activity-view.js";
+
 /** @type {import('./types.js').EstimationProfile} */
 export const DEFAULT_WORKING_PROFILE = {
   name: "working",
@@ -150,10 +152,11 @@ function perOutcome(cost, count) {
  * @param {import('./types.js').EstimationProfile} [workingProfile]
  */
 export function buildDailyReport(events, date, pricing, workingProfile = DEFAULT_WORKING_PROFILE, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  const chatRecords = resolveChatTurnRevisions(events)
+  const activityEvents = buildActivityReportView(events);
+  const chatRecords = resolveChatTurnRevisions(activityEvents)
     .filter((record) => dateInTimeZone(record.turn.timestamp, timeZone) === date);
   const chats = chatRecords.map((record) => record.turn);
-  const dayEvents = events.filter((event) => event.type !== "chat_turn" && dateInTimeZone(event.timestamp, timeZone) === date);
+  const dayEvents = activityEvents.filter((event) => event.type !== "chat_turn" && dateInTimeZone(event.timestamp, timeZone) === date);
   const commits = dayEvents.filter((event) => event.type === "git_commit");
   const pushes = dayEvents.filter((event) => event.type === "github_push");
   const pullRequests = dayEvents.filter((event) => event.type === "github_pull_request");
