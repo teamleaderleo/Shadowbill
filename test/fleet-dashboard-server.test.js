@@ -6,14 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import { DEFAULT_WORKING_PROFILE } from "../src/estimate.js";
 import { buildFleetProjection } from "../src/fleet-projection.js";
 import { buildRevisionProjection } from "../src/inspect-projection.js";
 import { inspectRepositoryEnrollment } from "../src/repository-enrollment.js";
 import { ObservationLedger } from "../src/observation-ledger.js";
+import { loadPricingCatalog } from "../src/pricing.js";
 import { RepositoryRegistryStore } from "../src/repository-registry.js";
 import { createCollectorServer, listen } from "../src/server.js";
 import { JsonlEventStore } from "../src/store.js";
-import { loadPricing, defaultProfile } from "../src/pricing.js";
 
 const exec = promisify(execFile);
 
@@ -109,12 +110,13 @@ async function fixture(callback) {
     const registryStore = new RepositoryRegistryStore(join(directory, "repositories.json"));
     await registryStore.enroll(await inspectRepositoryEnrollment(root));
     const eventStore = new JsonlEventStore(join(directory, "events.jsonl"));
-    const pricing = await loadPricing(new URL("../pricing/default.json", import.meta.url));
+    const catalog = await loadPricingCatalog();
+    const pricing = catalog.models["gpt-5.6-sol"];
     const server = createCollectorServer({
       store: eventStore,
       registryStore,
       pricing,
-      profile: defaultProfile(pricing, "gpt-5.4"),
+      profile: DEFAULT_WORKING_PROFILE,
       collectorToken: "fleet-dashboard-token",
       timeZone: "UTC",
     });
@@ -171,7 +173,7 @@ test("revision evidence HTTP output matches direct inspection and validates sele
 });
 
 test("one invalid repository policy degrades its panel without blanking fleet HTTP", async () => {
-  await fixture(async ({ directory, root, registryStore, eventStore, port }) => {
+  await fixture(async ({ directory, registryStore, port }) => {
     const secondRoot = join(directory, "broken");
     await createRepository(secondRoot, "acme/broken");
     await registryStore.enroll(await inspectRepositoryEnrollment(secondRoot));
