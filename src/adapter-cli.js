@@ -6,16 +6,9 @@ import { JsonlEventStore } from "./store.js";
 
 const REPOSITORY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
 const PUBLIC_RENDERPROVE_ERRORS = new Set([
-  "RENDERPROVE_REPOSITORY_UNKNOWN",
-  "RENDERPROVE_REPOSITORY_INVALID",
-  "RENDERPROVE_REPOSITORY_UNSUPPORTED",
-  "RENDERPROVE_ADAPTER_UNDECLARED",
-  "RENDERPROVE_SIGNAL_UNDECLARED",
-  "RENDERPROVE_REVISION_UNAVAILABLE",
-  "RENDERPROVE_REVISION_CONFLICT",
-  "RENDERPROVE_CHECKOUT_DIRTY",
-  "RENDERPROVE_CHECKOUT_CHANGED",
-  "RENDERPROVE_CLOCK_SKEW",
+  "RENDERPROVE_REPOSITORY_UNKNOWN", "RENDERPROVE_REPOSITORY_INVALID", "RENDERPROVE_REPOSITORY_UNSUPPORTED",
+  "RENDERPROVE_ADAPTER_UNDECLARED", "RENDERPROVE_SIGNAL_UNDECLARED", "RENDERPROVE_REVISION_UNAVAILABLE",
+  "RENDERPROVE_REVISION_CONFLICT", "RENDERPROVE_CHECKOUT_DIRTY", "RENDERPROVE_CHECKOUT_CHANGED", "RENDERPROVE_CLOCK_SKEW",
 ]);
 
 export class AdapterCliUsageError extends Error {
@@ -47,22 +40,11 @@ receipt to one stable clean checkout revision. Receipt content and local paths s
 }
 
 function parse(args) {
-  const options = {
-    repository: undefined,
-    adapter: "renderprove",
-    revision: undefined,
-    registryPath: undefined,
-    dataPath: undefined,
-    output: "human",
-    help: false,
-  };
+  const options = { repository: undefined, adapter: "renderprove", revision: undefined, registryPath: undefined, dataPath: undefined, output: "human", help: false };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
-    if (value === "--help" || value === "-h") {
-      options.help = true;
-      continue;
-    }
+    if (value === "--help" || value === "-h") { options.help = true; continue; }
     if (!["--repo", "--adapter", "--revision", "--registry", "--data", "--output"].includes(value)) {
       throw new AdapterCliUsageError(`Unknown ingest-adapter argument: ${value}`);
     }
@@ -81,28 +63,17 @@ function parse(args) {
     }
   }
   if (!options.help && !options.repository) throw new AdapterCliUsageError("ingest-adapter requires --repo owner/name.");
-  if (options.repository !== undefined && !REPOSITORY.test(options.repository)) {
-    throw new AdapterCliUsageError("--repo must use canonical lowercase owner/name form.");
-  }
+  if (options.repository !== undefined && !REPOSITORY.test(options.repository)) throw new AdapterCliUsageError("--repo must use canonical lowercase owner/name form.");
   if (options.adapter !== "renderprove") throw new AdapterCliUsageError("Only the renderprove adapter is supported in adapter v1.");
-  if (options.revision !== undefined && !/^[a-f0-9]{40}$/u.test(options.revision)) {
-    throw new AdapterCliUsageError("--revision must be a full lowercase SHA-1.");
-  }
+  if (options.revision !== undefined && !/^[a-f0-9]{40}$/u.test(options.revision)) throw new AdapterCliUsageError("--revision must be a full lowercase SHA-1.");
   return options;
 }
 
 function errorDetails(error) {
   const code = typeof error?.code === "string" ? error.code : "ADAPTER_INGEST_FAILED";
-  if (code.startsWith("RENDERPROVE_") && !PUBLIC_RENDERPROVE_ERRORS.has(code)) {
-    return { code, message: "Renderprove receipt verification failed." };
-  }
-  const details = {
-    code,
-    message: error instanceof Error ? error.message : String(error),
-  };
-  if (typeof error?.path === "string" && /^\$(?:\.[A-Za-z][A-Za-z0-9-]*|\[\d+\])*$/u.test(error.path)) {
-    details.path = error.path;
-  }
+  if (code.startsWith("RENDERPROVE_") && !PUBLIC_RENDERPROVE_ERRORS.has(code)) return { code, message: "Renderprove receipt verification failed." };
+  const details = { code, message: error instanceof Error ? error.message : String(error) };
+  if (typeof error?.path === "string" && /^\$(?:\.[A-Za-z][A-Za-z0-9-]*|\[\d+\])*$/u.test(error.path)) details.path = error.path;
   return details;
 }
 
@@ -115,16 +86,12 @@ export async function runIngestAdapterCommand(args) {
   let warnings = [];
   try {
     const options = parse(args);
-    if (options.help) {
-      console.log(help());
-      return;
-    }
+    if (options.help) { console.log(help()); return; }
     const storage = await resolveStorageIdentity({ explicitDataPath: options.dataPath });
     warnings = [...new Set(storage.warnings)];
     const registryPath = resolve(options.registryPath ?? join(dirname(storage.dataPath), "repositories.json"));
     const registry = await new RepositoryRegistryStore(registryPath).read();
-    const entry = registry.entries.find((candidate) =>
-      candidate.repository.identity === options.repository || candidate.repository.label === options.repository);
+    const entry = registry.entries.find((candidate) => candidate.repository.identity === options.repository || candidate.repository.label === options.repository);
     if (!entry) {
       const error = new Error("Repository is not enrolled.");
       error.code = "RENDERPROVE_REPOSITORY_UNKNOWN";
@@ -142,6 +109,7 @@ export async function runIngestAdapterCommand(args) {
       command: "ingest-adapter",
       adapter: options.adapter,
       status: result.status,
+      producerStatus: result.producerStatus,
       browserStatus: result.browserStatus,
       repository: result.repository,
       revision: result.revision,
@@ -161,17 +129,11 @@ export async function runIngestAdapterCommand(args) {
       printWarnings(warnings);
       const verb = result.status === "inserted" ? "Accepted" : "Already accepted";
       console.log(`${verb} Renderprove receipt for ${result.repository}@${result.revision.slice(0, 12)}.`);
-      console.log(`Browser result: ${result.browserStatus}; cases ${result.caseCount}; artifacts ${result.artifactCount}.`);
+      console.log(`Producer result: ${result.producerStatus}; indexed result: ${result.browserStatus}; cases ${result.caseCount}; artifacts ${result.artifactCount}.`);
       console.log(`Receipt: ${result.receiptDigest}`);
     }
   } catch (error) {
-    const response = {
-      service: "proofwake",
-      command: "ingest-adapter",
-      status: "error",
-      error: errorDetails(error),
-      warnings,
-    };
+    const response = { service: "proofwake", command: "ingest-adapter", status: "error", error: errorDetails(error), warnings };
     if (output === "json") console.log(JSON.stringify(response, null, 2));
     else {
       printWarnings(warnings);
