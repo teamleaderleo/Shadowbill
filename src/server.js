@@ -353,7 +353,7 @@ export function createCollectorServer(options) {
         const report = group === "repository"
           ? buildRepositoryAllocationReport(events, date, days, options.pricing, options.profile, timeZone)
           : days === 1
-            ? buildDailyReport(events, date, pricing, options.profile, timeZone)
+            ? buildDailyReport(events, date, options.pricing, options.profile, timeZone)
             : buildRangeReport(events, date, days, options.pricing, options.profile, timeZone);
         sendJson(response, 200, report);
         return;
