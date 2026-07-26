@@ -28,8 +28,8 @@ function assertPrivateContentExcluded(observation) {
 
 test("maps signed push and merged pull request deliveries", async () => {
   const data = await fixtures();
-  const push = map(data.push, { retainedCodeTokens: 73 });
-  const pullRequest = map(data.pullRequest, { retainedCodeTokens: 211 });
+  const push = map(data.push);
+  const pullRequest = map(data.pullRequest);
 
   for (const observation of [push, pullRequest]) {
     assert.equal(validateObservation(observation), observation);
@@ -39,6 +39,7 @@ test("maps signed push and merged pull request deliveries", async () => {
     assert.equal(observation.data.evidence.length, 1);
     assert.match(observation.data.evidence[0].digest, /^sha256:[a-f0-9]{64}$/u);
     assert.equal(observation.data.evidence[0].disclosure, "content-excluded");
+    assert.equal(factValue(observation, "proofwake.retained-code-tokens"), undefined);
     assertPrivateContentExcluded(observation);
   }
 
@@ -49,7 +50,6 @@ test("maps signed push and merged pull request deliveries", async () => {
   assert.deepEqual(push.data.relationships, { repository: "owner/repo", revision: "b".repeat(40) });
   assert.equal(factValue(push, "github.push.commit-count"), 2);
   assert.equal(factValue(push, "github.push.forced"), true);
-  assert.equal(factValue(push, "proofwake.retained-code-tokens"), 73);
 
   assert.equal(pullRequest.id, "github-pull_request-delivery-pr-1");
   assert.equal(pullRequest.subject, `repo:owner/repo@sha:${"c".repeat(40)}`);
@@ -61,7 +61,22 @@ test("maps signed push and merged pull request deliveries", async () => {
   });
   assert.equal(factValue(pullRequest, "github.pull-request.number"), 42);
   assert.equal(factValue(pullRequest, "github.pull-request.changed-files"), 5);
-  assert.equal(factValue(pullRequest, "proofwake.retained-code-tokens"), 211);
+});
+
+test("maps a revision-less deletion push without inventing revision authority", async () => {
+  const data = await fixtures();
+  const deleted = structuredClone(data.push);
+  deleted.deliveryId = "delivery-push-delete";
+  deleted.payload.after = "0".repeat(40);
+  deleted.payload.deleted = true;
+  deleted.payload.head_commit = null;
+  const observation = map(deleted);
+
+  assert.equal(validateObservation(observation), observation);
+  assert.equal(observation.subject, "repo:owner/repo");
+  assert.deepEqual(observation.data.relationships, { repository: "owner/repo" });
+  assert.equal(observation.data.timeSource, "adapter");
+  assert.equal(observation.time, deleted.receivedAt);
 });
 
 test("maps workflow outcomes and preserves rerun lineage", async () => {
