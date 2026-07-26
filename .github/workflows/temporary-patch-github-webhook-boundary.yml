@@ -1,15 +1,16 @@
 name: Temporary GitHub webhook boundary patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/github-webhook-strict-ledger-errors
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.event.pull_request.head.ref == 'fix/github-webhook-strict-ledger-errors'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out branch
