@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { runIngestAdapterCommand } from "./adapter-cli.js";
+import { runFailuresCommand, runRecoveriesCommand } from "./history-report-cli.js";
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
 import { runEnrollCommand, runRepositoriesCommand } from "./repository-cli.js";
@@ -35,6 +36,8 @@ Commands:
   inspect [REVISION] --repo owner/name [--registry PATH] [--data PATH]
                      [--output human|json]
   fleet [--registry PATH] [--data PATH] [--output human|json]
+  failures [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
+  recoveries [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
   mcp [--allow-writes]
@@ -47,7 +50,8 @@ Emit accepts one complete Proofwake observation v1 document. Enrolment is a dry 
 unless --write is supplied. A tracked, clean .proofwake.json is authoritative.
 Run launches one argument vector without a shell and records a bounded terminal receipt.
 Native adapter ingestion validates declared external receipts and artifact digests before indexing.
-Inspect and fleet rebuild read-only evidence projections from the registry and accepted ledger.
+Inspect and fleet rebuild current evidence projections. Failures and recoveries report bounded
+policy-matched history from the registry and accepted ledger.
 
 Legacy SHADOWBILL_* variables and the shadowbill binary remain compatibility aliases.`;
 }
@@ -191,6 +195,10 @@ if (command === undefined || command === "help" || command === "--help" || comma
   await runInspectCommand(process.argv.slice(3));
 } else if (command === "fleet") {
   await runFleetCommand(process.argv.slice(3));
+} else if (command === "failures") {
+  await runFailuresCommand(process.argv.slice(3));
+} else if (command === "recoveries") {
+  await runRecoveriesCommand(process.argv.slice(3));
 } else {
   await import("./cli.js");
 }
