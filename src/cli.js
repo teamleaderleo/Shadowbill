@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadOrCreateCollectorToken } from "./auth.js";
 import { buildDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
-import { collectHeadCommit, installPostCommitHook } from "./git.js";
+import { ingestHeadCommit, installPostCommitHook } from "./git.js";
 import { DEFAULT_ALLOWED_HOSTS } from "./http-security.js";
 import {
   ENVIRONMENT_ALIASES,
@@ -153,6 +153,27 @@ function printCompatibilityWarnings(warnings) {
   for (const warning of [...new Set(warnings)]) {
     console.error(`${PRODUCT_NAME} compatibility: ${warning}`);
   }
+}
+
+function gitIngestError(error) {
+  if (error?.code === "OBSERVATION_ID_CONFLICT") {
+    return {
+      code: "OBSERVATION_ID_CONFLICT",
+      message: "Git observation identity conflicts with an existing ledger record.",
+      format: "observation-v1",
+    };
+  }
+  if (typeof error?.code === "string" && error.code.startsWith("GIT_OBSERVATION_")) {
+    return {
+      code: error.code,
+      message: "Git commit observation mapping failed.",
+      format: "observation-v1",
+    };
+  }
+  return {
+    code: "PROOFWAKE_GIT_INGEST_FAILED",
+    message: "Git commit ingestion failed.",
+  };
 }
 
 async function main() {
@@ -313,9 +334,30 @@ async function main() {
   }
 
   if (command === "ingest-git") {
-    const event = await collectHeadCommit(argument("--repo") ?? process.cwd());
-    await store.append(event);
-    console.log(JSON.stringify(event));
+    try {
+      const result = await ingestHeadCommit({
+        repoPath: argument("--repo") ?? process.cwd(),
+        store,
+      });
+      console.log(JSON.stringify({
+        service: "proofwake",
+        command: "ingest-git",
+        ...result,
+      }));
+    } catch (error) {
+      const failure = gitIngestError(error);
+      console.log(JSON.stringify({
+        service: "proofwake",
+        command: "ingest-git",
+        status: "error",
+        ...(failure.format === undefined ? {} : { format: failure.format }),
+        error: {
+          code: failure.code,
+          message: failure.message,
+        },
+      }));
+      process.exitCode = 1;
+    }
     return;
   }
 
