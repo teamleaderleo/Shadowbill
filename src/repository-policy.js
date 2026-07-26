@@ -55,6 +55,7 @@ const TRUST_CLASSES = new Set([
   "untrusted-observation",
 ]);
 const BUILTIN_SOURCES = new Set(["local-command", "github", "manual"]);
+const SCHEMA_URI_PROTOCOLS = new Set(["https:", "urn:"]);
 
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,99}$/u;
 const SOURCE = /^(?:[a-z0-9][a-z0-9._-]{0,99}|adapter:[a-z0-9][a-z0-9._-]{0,99})$/u;
@@ -117,6 +118,7 @@ function normalizeRepository(repository) {
     if ("localId" in repository || "displayName" in repository) {
       fail("REPOSITORY_POLICY_IDENTITY_CONFLICT", "Remote repository identity must not include local fields.", "$.repository");
     }
+    exactKeys(repository, REPOSITORY_KEYS, ["kind", "id", "provider"], "$.repository");
     const id = string(repository.id, "$.repository.id", { max: 201, pattern: REMOTE_REPOSITORY }).toLowerCase();
     const provider = string(repository.provider, "$.repository.provider", { max: 100, pattern: SLUG }).toLowerCase();
     return { kind, id, provider };
@@ -124,6 +126,7 @@ function normalizeRepository(repository) {
   if ("id" in repository || "provider" in repository) {
     fail("REPOSITORY_POLICY_IDENTITY_CONFLICT", "Local repository identity must not include remote fields.", "$.repository");
   }
+  exactKeys(repository, REPOSITORY_KEYS, ["kind", "localId", "displayName"], "$.repository");
   const localId = string(repository.localId, "$.repository.localId", { max: 71, pattern: LOCAL_ID });
   const displayName = string(repository.displayName, "$.repository.displayName", { max: 100, pattern: SLUG }).toLowerCase();
   return { kind, localId, displayName };
@@ -219,10 +222,17 @@ function validateReceiptPath(value, path) {
 function validateSchemaName(value, path) {
   string(value, path, { max: 256 });
   if (SLUG.test(value)) return value;
-  if (!/^[a-z][a-z0-9+.-]*:[^\s]+$/iu.test(value)) {
-    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token or absolute URI.", path);
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token, HTTPS URL, or URN.", path);
   }
-  return value;
+  if (!SCHEMA_URI_PROTOCOLS.has(parsed.protocol) || parsed.username || parsed.password) {
+    fail("REPOSITORY_POLICY_INVALID_VALUE", "Schema must be a stable token, HTTPS URL, or URN without credentials.", path);
+  }
+  return parsed.href;
 }
 
 function normalizeAdapter(adapter, index) {
