@@ -242,7 +242,7 @@ The path:
 - contains no empty, current, or parent segment;
 - contains no colon, whitespace, Windows drive prefix, or backslash.
 
-The schema is a stable token or absolute URI. Trust uses the observation-v1 trust vocabulary. Policy validation does not read the receipt; adapter readiness and receipt ingestion remain separate operations.
+The schema identifier is either a lowercase stable token, an HTTPS URL without credentials, or a URN. `file:` URIs, insecure HTTP URLs, and credential-bearing URLs are rejected so committed policy cannot disclose local filesystem paths or secrets. Trust uses the observation-v1 trust vocabulary. Policy validation does not read the receipt; adapter readiness and receipt ingestion remain separate operations.
 
 ## Normalisation and fingerprint
 
