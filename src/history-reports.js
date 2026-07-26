@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { repositoryPolicyFingerprint } from "./repository-policy.js";
 
 const TERMINAL_FAILURES = new Set(["failed", "cancelled", "unavailable"]);
+const REVISION = /^[a-f0-9]{40}$/u;
 const MAX_ENTRIES = 500;
 
 export class HistoryReportError extends Error {
@@ -136,6 +137,7 @@ function policyMatch(entry, record) {
   const signal = entry.policy.signals.find((candidate) =>
     candidate.kind === record.kind && acceptedSource(record, candidate.acceptedSources));
   if (!signal) return null;
+  if (signal.subject === "revision" && !REVISION.test(record.relationships.revision ?? "")) return null;
   return {
     requirement: signal.requirement,
     subject: signal.subject,
@@ -145,11 +147,11 @@ function policyMatch(entry, record) {
   };
 }
 
-function groupKey(record) {
+function groupKey(item) {
   return [
-    record.relationships.repository ?? "",
-    record.relationships.revision ?? "",
-    record.kind,
+    item.record.relationships.repository ?? "",
+    item.policy.subject === "revision" ? item.record.relationships.revision ?? "" : "",
+    item.record.kind,
   ].join("\u0000");
 }
 
@@ -160,7 +162,7 @@ function completePass(record) {
 function recordSummary(record, policy) {
   return {
     repository: record.relationships.repository ?? null,
-    revision: record.relationships.revision ?? null,
+    revision: policy.subject === "revision" ? record.relationships.revision ?? null : null,
     kind: record.kind,
     status: record.status,
     source: record.source,
@@ -200,14 +202,14 @@ function sourceCursor(registry, records) {
 async function snapshot({ registryStore, eventStore }) {
   const [registry, events] = await Promise.all([registryStore.read(), eventStore.readAll()]);
   const entries = new Map(registry.entries.map((entry) => [entry.repository.identity, entry]));
-  const records = normalizedRecords(events).filter((record) => entries.has(record.relationships.repository));
   const matched = [];
-  for (const record of records) {
+  for (const record of normalizedRecords(events)) {
     const entry = entries.get(record.relationships.repository);
+    if (!entry) continue;
     const policy = policyMatch(entry, record);
     if (policy) matched.push({ record, policy });
   }
-  return { registry, records, matched };
+  return { registry, matched };
 }
 
 function reportWindow(now, days) {
@@ -216,13 +218,17 @@ function reportWindow(now, days) {
   return { days, startAt, endAt, basis: "observedAt", mode: "rolling-duration" };
 }
 
+function matchedRecords(state) {
+  return state.matched.map((item) => item.record);
+}
+
 export async function buildFailureReport({ registryStore, eventStore, days = 30, now = new Date() }) {
   validateDays(days);
   const state = await snapshot({ registryStore, eventStore });
   const window = reportWindow(now, days);
   const grouped = new Map();
   for (const item of state.matched) {
-    const key = groupKey(item.record);
+    const key = groupKey(item);
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(item);
   }
@@ -248,7 +254,7 @@ export async function buildFailureReport({ registryStore, eventStore, days = 30,
     command: "failures",
     projectionVersion: 1,
     generatedAt: now.toISOString(),
-    sourceCursor: sourceCursor(state.registry, state.records),
+    sourceCursor: sourceCursor(state.registry, matchedRecords(state)),
     window,
     summary: {
       total: failures.length,
@@ -267,7 +273,7 @@ export async function buildRecoveryReport({ registryStore, eventStore, days = 30
   const window = reportWindow(now, days);
   const grouped = new Map();
   for (const item of state.matched) {
-    const key = groupKey(item.record);
+    const key = groupKey(item);
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(item);
   }
@@ -282,12 +288,13 @@ export async function buildRecoveryReport({ registryStore, eventStore, days = 30
       }
       if (!pendingFailure || !completePass(item.record)) continue;
       if (item.record.observedAt >= window.startAt && item.record.observedAt <= window.endAt) {
+        const revisionScoped = item.policy.subject === "revision";
         recoveries.push({
-          type: item.record.relationships.revision ? "same-revision-rerun" : "same-subject-rerun",
-          relation: item.record.relationships.revision ? "same-revision" : "same-subject",
+          type: revisionScoped ? "same-revision-rerun" : "same-subject-rerun",
+          relation: revisionScoped ? "same-revision" : "same-subject",
           causality: "sequence-only",
           repository: item.record.relationships.repository ?? null,
-          revision: item.record.relationships.revision ?? null,
+          revision: revisionScoped ? item.record.relationships.revision ?? null : null,
           kind: item.record.kind,
           policy: item.policy,
           from: recordSummary(pendingFailure.record, pendingFailure.policy),
@@ -307,7 +314,7 @@ export async function buildRecoveryReport({ registryStore, eventStore, days = 30
     command: "recoveries",
     projectionVersion: 1,
     generatedAt: now.toISOString(),
-    sourceCursor: sourceCursor(state.registry, state.records),
+    sourceCursor: sourceCursor(state.registry, matchedRecords(state)),
     window,
     summary: {
       total: recoveries.length,
