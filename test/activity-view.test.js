@@ -8,17 +8,25 @@ import {
 
 const REVISION = "a".repeat(40);
 
-function observationRecord({ id, type, kind, status = "passed", facts = [], relationships = {} }) {
+function githubEventName(type) {
+  if (type === ACTIVITY_OBSERVATION_TYPES.githubPush) return "push";
+  if (type === ACTIVITY_OBSERVATION_TYPES.githubPullRequest) return "pull_request";
+  if (type === ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun) return "workflow_run";
+  return "deployment_status";
+}
+
+function observationRecord({ id, type, kind, status = "passed", facts = [], relationships = {}, durationMs }) {
   const repository = relationships.repository ?? "acme/repo";
   const revision = relationships.revision;
+  const github = type.includes("github");
   return {
     type: "proofwake_observation",
     id: `record-${id}`,
     timestamp: "2026-07-26T13:00:01.000Z",
     observation: {
       specversion: "1.0",
-      id,
-      source: "https://api.github.com/hooks/proofwake",
+      id: github ? `github-${githubEventName(type)}-${id}` : id,
+      source: github ? "urn:proofwake:provider:github" : "urn:proofwake:adapter:git",
       type,
       subject: revision ? `repo:${repository}@sha:${revision}` : `repo:${repository}`,
       time: "2026-07-26T13:00:00.000Z",
@@ -26,18 +34,19 @@ function observationRecord({ id, type, kind, status = "passed", facts = [], rela
       data: {
         schemaVersion: 1,
         adapter: {
-          name: type.includes("github") ? "github" : "git",
+          name: github ? "github" : "git",
           version: "1.0.0",
           mappingVersion: 1,
-          trust: type.includes("github") ? "signed-provider" : "local-operator",
+          trust: github ? "signed-provider" : "local-operator",
           sourceSchema: "activity.test",
           sourceSchemaVersion: "1",
         },
         kind,
         status,
-        timeSource: "provider",
+        timeSource: github ? "provider" : "producer",
         observedAt: "2026-07-26T13:00:00.000Z",
         ingestedAt: "2026-07-26T13:00:01.000Z",
+        ...(durationMs === undefined ? {} : { durationMs }),
         relationships: { repository, ...relationships },
         facts: facts.map(([name, value]) => ({ name, value })),
         evidence: [],
@@ -47,7 +56,7 @@ function observationRecord({ id, type, kind, status = "passed", facts = [], rela
   };
 }
 
-test("maps bounded observation activity into legacy report events", () => {
+test("maps the pure activity mapper contract into legacy report events", () => {
   const records = [
     observationRecord({
       id: "local-commit",
@@ -55,10 +64,10 @@ test("maps bounded observation activity into legacy report events", () => {
       kind: "verify",
       relationships: { revision: REVISION },
       facts: [
-        ["git.additions", 10],
-        ["git.deletions", 2],
-        ["git.changed-files", 3],
-        ["git.added-code-tokens", 100],
+        ["git.commit.additions", 10],
+        ["git.commit.deletions", 2],
+        ["git.commit.changed-files", 3],
+        ["proofwake.retained-code-tokens", 100],
       ],
     }),
     observationRecord({
@@ -67,8 +76,6 @@ test("maps bounded observation activity into legacy report events", () => {
       kind: "verify",
       relationships: { revision: REVISION },
       facts: [
-        ["github.push.before", "b".repeat(40)],
-        ["github.push.after", REVISION],
         ["github.push.commit-count", 2],
         ["github.push.created", false],
         ["github.push.deleted", false],
@@ -82,13 +89,6 @@ test("maps bounded observation activity into legacy report events", () => {
       relationships: { revision: REVISION },
       facts: [
         ["github.pull-request.number", 7],
-        ["github.pull-request.action", "closed"],
-        ["github.pull-request.state", "closed"],
-        ["github.pull-request.merged", true],
-        ["github.pull-request.draft", false],
-        ["github.pull-request.head-sha", REVISION],
-        ["github.pull-request.base-sha", "b".repeat(40)],
-        ["github.pull-request.merge-commit-sha", "c".repeat(40)],
         ["github.pull-request.additions", 10],
         ["github.pull-request.deletions", 2],
         ["github.pull-request.changed-files", 3],
@@ -98,22 +98,16 @@ test("maps bounded observation activity into legacy report events", () => {
       id: "workflow-delivery",
       type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
       kind: "github-ci",
-      relationships: { revision: REVISION, workflowAttempt: 2 },
-      facts: [
-        ["github.workflow-run.id", 99],
-        ["github.workflow-run.head-sha", REVISION],
-        ["github.workflow-run.duration-ms", 1234],
-      ],
+      relationships: { revision: REVISION, run: "github-workflow-99", workflowAttempt: 2 },
+      durationMs: 1234,
+      facts: [["github.workflow.rerun", true]],
     }),
     observationRecord({
       id: "deployment-delivery",
       type: ACTIVITY_OBSERVATION_TYPES.githubDeploymentStatus,
       kind: "deployment",
-      relationships: { revision: REVISION },
-      facts: [
-        ["github.deployment.id", 42],
-        ["github.deployment.sha", REVISION],
-      ],
+      relationships: { revision: REVISION, deployment: "github-deployment-42" },
+      facts: [],
     }),
   ];
 
@@ -124,12 +118,21 @@ test("maps bounded observation activity into legacy report events", () => {
     "github_workflow_run",
     "github_deployment",
   ]);
+  const commit = activityEventFromObservationRecord(records[0]);
+  assert.equal(commit.additions, 10);
+  assert.equal(commit.addedCodeTokens, 100);
+  const pullRequest = activityEventFromObservationRecord(records[2]);
+  assert.equal(pullRequest.number, 7);
+  assert.equal(pullRequest.merged, true);
+  assert.equal(pullRequest.mergeCommitSha, REVISION);
   const workflow = activityEventFromObservationRecord(records[3]);
   assert.equal(workflow.runId, 99);
   assert.equal(workflow.runAttempt, 2);
+  assert.equal(workflow.durationMs, 1234);
   assert.equal(workflow.conclusion, "success");
   assert.equal(workflow.workflow, "");
   const deployment = activityEventFromObservationRecord(records[4]);
+  assert.equal(deployment.deploymentId, 42);
   assert.equal(deployment.state, "success");
   assert.equal(deployment.environment, "");
 });
@@ -139,8 +142,8 @@ test("observation activity replaces matching legacy deliveries exactly once", ()
     id: "same-delivery",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
     kind: "github-ci",
-    relationships: { revision: REVISION, workflowAttempt: 1 },
-    facts: [["github.workflow-run.id", 9]],
+    relationships: { revision: REVISION, run: "github-workflow-9", workflowAttempt: 1 },
+    facts: [["github.workflow.rerun", false]],
   });
   const legacy = {
     type: "github_workflow_run",
@@ -180,10 +183,30 @@ test("unknown, malformed, or untrusted observations do not hide legacy activity"
     id: "untrusted",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
     kind: "github-ci",
-    relationships: { revision: REVISION },
-    facts: [["github.workflow-run.id", 1]],
+    relationships: { revision: REVISION, run: "github-workflow-1", workflowAttempt: 1 },
+    facts: [["github.workflow.rerun", false]],
   });
   untrusted.observation.data.adapter.trust = "untrusted-observation";
 
   assert.deepEqual(buildActivityReportView([legacy, unknown, malformed, untrusted]), [legacy]);
+});
+
+test("malformed provider delivery and relationship identities fail closed", () => {
+  const badDelivery = observationRecord({
+    id: "bad-delivery",
+    type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
+    kind: "github-ci",
+    relationships: { revision: REVISION, run: "github-workflow-9", workflowAttempt: 1 },
+    facts: [],
+  });
+  badDelivery.observation.id = "github-workflow_run-bad delivery";
+  const badRun = observationRecord({
+    id: "run-delivery",
+    type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
+    kind: "github-ci",
+    relationships: { revision: REVISION, run: "github-workflow-09", workflowAttempt: 1 },
+    facts: [],
+  });
+  assert.equal(activityEventFromObservationRecord(badDelivery), null);
+  assert.equal(activityEventFromObservationRecord(badRun), null);
 });
