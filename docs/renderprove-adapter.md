@@ -1,6 +1,6 @@
 # Native Renderprove adapter
 
-Proofwake can verify and index a declared Renderprove receipt without copying screenshots, URLs, diagnostics, commands, or local paths into the observation ledger.
+Proofwake can verify and index a declared Renderprove receipt while screenshots, URLs, diagnostics, commands, and local paths remain outside the observation ledger.
 
 ```bash
 proofwake ingest-adapter --repo owner/project
@@ -75,6 +75,8 @@ The adapter:
 
 A valid receipt whose browser policy status is `failed` becomes a valid failing `browser-review` observation. Adapter failure and browser-policy failure remain separate outcomes.
 
+Renderprove v1 also permits a valid zero-case receipt whose producer status is `passed`. Proofwake indexes that receipt as `unavailable` coverage because no browser case ran. The command returns both `producerStatus` and indexed `browserStatus` so the distinction stays explicit.
+
 ## Observation mapping
 
 The ledger stores:
@@ -82,13 +84,13 @@ The ledger stores:
 - repository and exact revision;
 - stable receipt/run identity;
 - producer start, finish, and duration;
-- overall browser status and case totals;
+- indexed browser status and case totals;
 - hashed project, manifest, and stable case identities;
 - per-case status and navigation success;
 - aggregate navigation, page-unavailable, horizontal-overflow, and diagnostic-class counts;
 - receipt and screenshot SHA-256 references, sizes, media types, producer, schema, and restricted disclosure class.
 
-The exact receipt and verified screenshot references provide complete mapped browser-review coverage. Their content remains in the caller-managed Renderprove output store.
+For a non-empty review, the exact receipt and verified screenshot references provide complete mapped browser-review coverage. Their content remains in the caller-managed Renderprove output store. A zero-case review carries unavailable coverage.
 
 ## Privacy
 
@@ -102,4 +104,4 @@ The observation excludes:
 - receipt and screenshot filesystem paths;
 - screenshot bytes.
 
-CLI JSON output contains repository identity, revision, digest, counts, status, and observation identity. It contains no local checkout, registry, receipt, or artifact path.
+CLI JSON output contains repository identity, revision, digest, counts, producer status, indexed browser status, and observation identity. It contains no local checkout, registry, receipt, or artifact path. Receipt-derived parse and validation failures expose stable error codes with content-minimised public messages.
