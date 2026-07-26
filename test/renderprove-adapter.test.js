@@ -14,10 +14,15 @@ import { JsonlEventStore } from "../src/store.js";
 
 const exec = promisify(execFile);
 const INGESTION_TIME = new Date("2026-07-26T11:00:00.000Z");
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 async function git(root, ...args) {
   const { stdout } = await exec("git", ["-C", root, ...args], { encoding: "utf8" });
   return stdout.trim();
+}
+
+function png(label) {
+  return Buffer.concat([PNG_SIGNATURE, Buffer.from(label)]);
 }
 
 function digest(bytes) {
@@ -47,12 +52,12 @@ function policy() {
   };
 }
 
-function receipt({ artifactDigest, status = "passed", diagnostic = "private console token=secret", baseUrl = "https://private.example.test" }) {
+function receipt({ artifactDigest, status = "passed", baseUrl = "https://private.example.test" }) {
   const failed = status === "failed" ? 1 : 0;
   const diagnostics = status === "failed" ? [{
     at: "2026-07-26T10:00:01.000Z",
     kind: "console",
-    message: diagnostic,
+    message: "private console token=secret",
     url: `${baseUrl}/private`,
   }] : [];
   return {
@@ -94,12 +99,7 @@ function receipt({ artifactDigest, status = "passed", diagnostic = "private cons
         scrollHeight: 900,
         clientHeight: 900,
       },
-      artifacts: [{
-        kind: "screenshot",
-        path: ".renderprove/screenshots/private.png",
-        mimeType: "image/png",
-        sha256: artifactDigest,
-      }],
+      artifacts: [{ kind: "screenshot", path: ".renderprove/screenshots/private.png", mimeType: "image/png", sha256: artifactDigest }],
       diagnostics,
     }],
   };
@@ -124,7 +124,7 @@ async function fixture(callback) {
     const registryStore = new RepositoryRegistryStore(join(directory, "repositories.json"));
     const enrolled = await registryStore.enroll(await inspectRepositoryEnrollment(root));
     const eventStore = new JsonlEventStore(join(directory, "events.jsonl"));
-    const screenshot = Buffer.from("not-a-real-png-but-digest-verifiable");
+    const screenshot = png("digest-verifiable screenshot");
     await mkdir(join(root, ".renderprove", "screenshots"), { recursive: true });
     await writeFile(join(root, ".renderprove", "screenshots", "private.png"), screenshot);
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: digest(screenshot) }), null, 2)}\n`);
@@ -145,14 +145,16 @@ test("a verified passing receipt produces content-minimised browser evidence", a
     assert.match(result.receiptDigest, /^sha256:[a-f0-9]{64}$/u);
 
     const events = await eventStore.readAll();
-    assert.equal(events.length, 1);
     const observation = events[0].observation;
+    assert.equal(events.length, 1);
     assert.equal(observation.data.status, "passed");
     assert.equal(observation.data.adapter.trust, "local-operator");
-    assert.equal(observation.data.coverage.state, "complete");
-    assert.equal(observation.data.coverage.redacted, false);
+    assert.deepEqual(observation.data.coverage, { state: "complete", redacted: false, truncated: false, omitted: [] });
     assert.equal(observation.data.evidence.length, 2);
     assert.equal(observation.data.relationships.revision, revision);
+    const facts = Object.fromEntries(observation.data.facts.map((fact) => [fact.name, fact.value]));
+    assert.equal(facts["renderprove.summary.navigation-failed"], 0);
+    assert.equal(facts["renderprove.diagnostics.console"], 0);
 
     const raw = await readFile(join(directory, "events.jsonl"), "utf8");
     for (const secret of [
@@ -160,12 +162,7 @@ test("a verified passing receipt produces content-minimised browser evidence", a
       "/private/worker/checkout", ".renderprove/screenshots/private.png", "private console",
     ]) assert.equal(raw.includes(secret), false, secret);
 
-    const projection = await buildRevisionProjection({
-      repository: "acme/web",
-      registryStore,
-      eventStore,
-      now: new Date("2026-07-26T11:00:00.000Z"),
-    });
+    const projection = await buildRevisionProjection({ repository: "acme/web", registryStore, eventStore, now: INGESTION_TIME });
     assert.equal(projection.status, "green");
     assert.equal(projection.signals[0].state, "passed");
     assert.equal(projection.signals[0].latest.evidence.length, 2);
@@ -176,15 +173,12 @@ test("a valid failing receipt becomes failing evidence instead of adapter failur
   await fixture(async ({ root, revision, entry, registryStore, eventStore, screenshot }) => {
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: digest(screenshot), status: "failed" }), null, 2)}\n`);
     const result = await ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME });
-    assert.equal(result.status, "inserted");
     assert.equal(result.browserStatus, "failed");
-    const projection = await buildRevisionProjection({
-      repository: "acme/web",
-      revision,
-      registryStore,
-      eventStore,
-      now: INGESTION_TIME,
-    });
+    const observation = (await eventStore.readAll())[0].observation;
+    const facts = Object.fromEntries(observation.data.facts.map((fact) => [fact.name, fact.value]));
+    assert.equal(facts["renderprove.summary.navigation-failed"], 1);
+    assert.equal(facts["renderprove.diagnostics.console"], 1);
+    const projection = await buildRevisionProjection({ repository: "acme/web", revision, registryStore, eventStore, now: INGESTION_TIME });
     assert.equal(projection.status, "red");
     assert.equal(projection.signals[0].state, "failing");
   });
@@ -196,7 +190,6 @@ test("exact replay is idempotent and producer identity reuse with changed bytes 
     const replay = await ingestRenderproveReceipt({ entry, eventStore, now: new Date("2026-07-26T11:01:00.000Z") });
     assert.equal(replay.status, "duplicate");
     assert.equal(replay.observation.data.ingestedAt, first.observation.data.ingestedAt);
-
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({
       artifactDigest: digest(screenshot),
       baseUrl: "https://changed-private.example.test",
@@ -209,7 +202,7 @@ test("exact replay is idempotent and producer identity reuse with changed bytes 
   });
 });
 
-test("unsupported schema, duplicate keys, and digest mismatch never become evidence", async () => {
+test("unsupported schema, duplicate keys, digest mismatch, and media mismatch never become evidence", async () => {
   await fixture(async ({ root, entry, eventStore, screenshot }) => {
     const unsupported = receipt({ artifactDigest: digest(screenshot) });
     unsupported.version = 2;
@@ -221,6 +214,11 @@ test("unsupported schema, duplicate keys, and digest mismatch never become evide
 
     await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: "a".repeat(64) }))}\n`);
     await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_ARTIFACT_DIGEST_MISMATCH");
+
+    const fake = Buffer.from("plain bytes");
+    await writeFile(join(root, ".renderprove", "screenshots", "private.png"), fake);
+    await writeFile(join(root, ".renderprove", "receipt.json"), `${JSON.stringify(receipt({ artifactDigest: digest(fake) }))}\n`);
+    await assert.rejects(ingestRenderproveReceipt({ entry, eventStore, now: INGESTION_TIME }), (error) => error.code === "RENDERPROVE_ARTIFACT_MEDIA_MISMATCH");
     assert.equal((await eventStore.readAll()).length, 0);
   });
 });
@@ -239,7 +237,7 @@ test("tracked changes and unrelated untracked files prevent revision binding", a
 test("artifact symlink escape is rejected before observation append", async () => {
   await fixture(async ({ root, outside, entry, eventStore }) => {
     const outsideArtifact = join(outside, "private.png");
-    const bytes = Buffer.from("outside-private-artifact");
+    const bytes = png("outside-private-artifact");
     await writeFile(outsideArtifact, bytes);
     await rm(join(root, ".renderprove", "screenshots", "private.png"));
     await symlink(outsideArtifact, join(root, ".renderprove", "screenshots", "private.png"));
