@@ -18,7 +18,7 @@ test("maps a local Git commit into a valid content-minimised observation", async
   });
 
   assert.equal(validateObservation(observation), observation);
-  assert.equal(observation.id, `git-commit-${input.sha}`);
+  assert.match(observation.id, /^git-commit-[a-f0-9]{64}$/u);
   assert.equal(observation.source, "urn:proofwake:adapter:git");
   assert.equal(observation.type, "dev.proofwake.git.commit.v1");
   assert.equal(observation.subject, `repo:owner/repo@sha:${input.sha}`);
@@ -47,7 +47,7 @@ test("maps a local Git commit into a valid content-minimised observation", async
   }
 });
 
-test("Git mapping is deterministic apart from ingestion time", async () => {
+test("Git mapping is replay-stable and repository-scoped", async () => {
   const input = await fixture();
   const first = mapGitCommitObservation(input, {
     observedAt: "2026-07-25T17:00:02.000Z",
@@ -57,7 +57,15 @@ test("Git mapping is deterministic apart from ingestion time", async () => {
     observedAt: "2026-07-25T17:00:02.000Z",
     ingestedAt: "2026-07-25T17:05:00.000Z",
   });
+  const otherRepository = mapGitCommitObservation({ ...input, repository: "other/repo" }, {
+    observedAt: "2026-07-25T17:00:02.000Z",
+    ingestedAt: "2026-07-25T17:00:03.000Z",
+  });
+
+  assert.equal(first.id, replay.id);
   assert.equal(observationFingerprint(first), observationFingerprint(replay));
+  assert.notEqual(first.id, otherRepository.id);
+  assert.notEqual(observationFingerprint(first), observationFingerprint(otherRepository));
 });
 
 test("Git mapping rejects ambiguous identity and invalid counts with stable codes", async () => {
