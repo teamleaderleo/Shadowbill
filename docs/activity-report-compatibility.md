@@ -4,7 +4,7 @@
 
 This document defines the migration seam between legacy Shadowbill delivery events and Proofwake observation-v1 activity. It does not change collector writes by itself.
 
-The implementation lives in `src/activity-view.js`.
+The implementation lives in `src/activity-view.js` and consumes the pure mapping contract from issue #69's mapper slice.
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Estimate and repository-allocation reports historically read these ledger event 
 - `github_workflow_run`;
 - `github_deployment`.
 
-During issue #69, new local Git and signed GitHub deliveries will become observation-v1 records. Reports need one bounded view that can read both generations without rewriting history and without counting one source effect twice.
+During issue #69, new local Git and signed GitHub deliveries become observation-v1 records. Reports need one bounded view that can read both generations without rewriting history and without counting one source effect twice.
 
 ## Observation types
 
@@ -24,11 +24,11 @@ The compatibility view recognises only these explicit observation types:
 
 - `dev.proofwake.git.commit.v1`;
 - `dev.proofwake.github.push.v1`;
-- `dev.proofwake.github.pull-request.v1`;
+- `dev.proofwake.github.pull-request-merged.v1`;
 - `dev.proofwake.github.workflow-run.v1`;
 - `dev.proofwake.github.deployment-status.v1`.
 
-Other observation types remain outside estimate reports.
+Other observation types, including published-release observations, remain outside estimate reports.
 
 Local commit observations require adapter name `git` with `local-operator` trust. GitHub observations require adapter name `github` with `signed-provider` trust. A structurally incomplete, malformed, or differently trusted record is ignored by this view and cannot suppress legacy activity.
 
@@ -39,15 +39,22 @@ The observation `(source, id)` pair is hashed for the internal compatibility eve
 Duplicate-representation keys are:
 
 - local commit: repository plus full revision;
-- GitHub delivery: provider delivery ID, carried as the observation ID.
+- GitHub delivery: provider delivery ID extracted from the mapper's bounded observation ID.
+
+The recognised GitHub ID prefixes are:
+
+- `github-push-`;
+- `github-pull_request-`;
+- `github-workflow_run-`;
+- `github-deployment_status-`.
 
 When a recognised observation and a legacy event have the same key, the observation-backed representation is selected and the legacy representation is suppressed. This handles a bounded transition or atomic compatibility record without double counting.
 
 The view does not heuristically merge different provider deliveries or unrelated observations that happen to share timestamps, repository identity, run identity, or status.
 
-## Scalar fact contract
+## Scalar and relationship contract
 
-Facts are optional unless listed as required below. Missing optional counts become zero and missing optional private labels become empty strings. Content-bearing values are deliberately not reconstructed.
+Facts are optional unless listed as required below. Missing optional counts become zero. Content-bearing values are deliberately not reconstructed.
 
 ### Local Git commit
 
@@ -58,10 +65,10 @@ Relationships:
 
 Allowlisted facts:
 
-- `git.additions`;
-- `git.deletions`;
-- `git.changed-files`;
-- `git.added-code-tokens`.
+- `git.commit.additions`;
+- `git.commit.deletions`;
+- `git.commit.changed-files`;
+- `proofwake.retained-code-tokens`.
 
 Commit subject and branch name remain excluded from the compatibility output.
 
@@ -70,25 +77,24 @@ Commit subject and branch name remain excluded from the compatibility output.
 Relationships:
 
 - `repository` — required;
-- `revision` — optional current revision.
+- `revision` — optional current revision; absent for a deletion delivery.
 
 Allowlisted facts:
 
-- `github.push.before`;
-- `github.push.after`;
 - `github.push.commit-count`;
 - `github.push.created`;
 - `github.push.deleted`;
 - `github.push.forced`.
 
-Ref and branch text remain excluded.
+Ref, branch, before-revision text, commit prose, and paths remain excluded.
 
-### GitHub pull request
+### Merged GitHub pull request
 
 Relationships:
 
 - `repository` — required;
-- `revision` — optional selected or merged revision.
+- `revision` — required verified merge revision;
+- one bounded pull-request correlation may be present but is not needed by estimate reports.
 
 Required fact:
 
@@ -96,54 +102,36 @@ Required fact:
 
 Allowlisted optional facts:
 
-- `github.pull-request.action`;
-- `github.pull-request.state`;
-- `github.pull-request.merged`;
-- `github.pull-request.draft`;
-- `github.pull-request.head-sha`;
-- `github.pull-request.base-sha`;
-- `github.pull-request.merge-commit-sha`;
 - `github.pull-request.additions`;
 - `github.pull-request.deletions`;
 - `github.pull-request.changed-files`.
 
-Pull-request title, body, comments, author text, labels, and URLs remain excluded.
+The compatibility event is always closed and merged. Pull-request title, body, comments, author text, labels, head/base refs, and URLs remain excluded.
 
 ### GitHub workflow run
 
 Relationships:
 
 - `repository` — required;
-- `revision` — optional head revision;
+- `revision` — required head revision;
+- `run` — required exact `github-workflow-N` provider-run identity;
 - `workflowAttempt` — optional positive attempt number, defaulting to one.
 
-Required fact:
+Optional observation field:
 
-- `github.workflow-run.id`.
+- `data.durationMs` — bounded run duration.
 
-Allowlisted optional facts:
-
-- `github.workflow-run.head-sha`;
-- `github.workflow-run.duration-ms`.
-
-Observation status maps to the legacy conclusion used by aggregate reports. Workflow display names and logs remain excluded.
+The mapper's `github.workflow.rerun` fact remains valid producer metadata but is not needed to reconstruct historical aggregate counts. Observation status maps to the legacy conclusion used by reports. Workflow display names, workflow paths, jobs, and logs remain excluded.
 
 ### GitHub deployment status
 
 Relationships:
 
 - `repository` — required;
-- `revision` — optional deployment revision.
+- `revision` — required deployment revision;
+- `deployment` — required exact `github-deployment-N` provider identity.
 
-Required fact:
-
-- `github.deployment.id`.
-
-Allowlisted optional fact:
-
-- `github.deployment.sha`.
-
-Observation status maps to the legacy deployment state. Environment names, refs, URLs, descriptions, and provider payload content remain excluded.
+Observation status maps to the legacy deployment state. Environment names, refs, URLs, descriptions, logs, and provider payload content remain excluded.
 
 ## Boundaries
 
