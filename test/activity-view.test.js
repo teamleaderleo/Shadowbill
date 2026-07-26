@@ -191,6 +191,7 @@ test("unknown, malformed, untrusted, or unbound observations do not hide legacy 
     facts: [["github.workflow.rerun", false]],
   });
   untrusted.observation.data.adapter.trust = "untrusted-observation";
+  untrusted.requestFingerprint = observationFingerprint(untrusted.observation);
   const unbound = observationRecord({
     id: "unbound",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
@@ -203,17 +204,17 @@ test("unknown, malformed, untrusted, or unbound observations do not hide legacy 
   assert.deepEqual(buildActivityReportView([legacy, unknown, malformed, untrusted, unbound]), [legacy]);
 });
 
-test("malformed provider delivery and relationship identities fail closed", () => {
-  const badDelivery = observationRecord({
+test("valid observations with the wrong provider prefix or relationship identity fail closed", () => {
+  const wrongPrefix = observationRecord({
     id: "bad-delivery",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
     kind: "github-ci",
     relationships: { revision: REVISION, run: "github-workflow-9", workflowAttempt: 1 },
     facts: [],
   });
-  badDelivery.observation.id = "github-workflow_run-bad delivery";
-  badDelivery.observationIdentity.id = badDelivery.observation.id;
-  badDelivery.requestFingerprint = observationFingerprint(badDelivery.observation);
+  wrongPrefix.observation.id = "github-workflow-run-bad-delivery";
+  wrongPrefix.observationIdentity.id = wrongPrefix.observation.id;
+  wrongPrefix.requestFingerprint = observationFingerprint(wrongPrefix.observation);
   const badRun = observationRecord({
     id: "run-delivery",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
@@ -221,6 +222,6 @@ test("malformed provider delivery and relationship identities fail closed", () =
     relationships: { revision: REVISION, run: "github-workflow-09", workflowAttempt: 1 },
     facts: [],
   });
-  assert.equal(activityEventFromObservationRecord(badDelivery), null);
+  assert.equal(activityEventFromObservationRecord(wrongPrefix), null);
   assert.equal(activityEventFromObservationRecord(badRun), null);
 });
