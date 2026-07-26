@@ -153,11 +153,22 @@ function projectionAttention(report) {
   return null;
 }
 
+function stableRevisionContext(revision) {
+  return {
+    confidence: revision.confidence,
+    relationToCheckout: revision.relationToCheckout,
+    timestamp: revision.timestamp,
+    defaultBranch: revision.defaultBranch,
+    defaultBranchSelected: revision.defaultBranchSelected,
+    defaultBranchConfidence: revision.defaultBranchConfidence,
+  };
+}
+
 function contextualCursor(report) {
   const payload = {
     base: report.sourceCursor,
     repositoryState: report.repositoryState,
-    revision: report.revision,
+    revision: stableRevisionContext(report.revision),
     configuration: {
       source: report.configuration.source,
       fingerprint: report.configuration.fingerprint,
@@ -168,9 +179,31 @@ function contextualCursor(report) {
   return `sha256:${createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex")}`;
 }
 
+async function snapshotOptions(options) {
+  const [registry, events] = await Promise.all([
+    options.registryStore.read(),
+    options.eventStore.readAll(),
+  ]);
+  return {
+    ...options,
+    registryStore: { read: async () => registry },
+    eventStore: { readAll: async () => events },
+  };
+}
+
+function suppressStaleRecoveryClaims(report) {
+  for (const signal of report.signals) {
+    if (signal.state === "passed") continue;
+    signal.recovery = null;
+    signal.ambiguousRecoveryCandidates = [];
+  }
+}
+
 export async function buildRevisionProjection(options) {
-  const report = await buildRawRevisionProjection(options);
-  await enforceDefaultBranchAuthority(report, options);
+  const snapshot = await snapshotOptions(options);
+  const report = await buildRawRevisionProjection(snapshot);
+  await enforceDefaultBranchAuthority(report, snapshot);
+  suppressStaleRecoveryClaims(report);
   report.status = projectionStatus(report);
   report.attention = projectionAttention(report);
   const timeline = firstGreenTimeline(report);
