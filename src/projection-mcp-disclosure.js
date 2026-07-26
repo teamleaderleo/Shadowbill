@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const SAFE_PROBLEM_MESSAGES = new Map([
   ["REPOSITORY_ROOT_MISSING", "Enrolled repository root is missing."],
   ["REPOSITORY_ROOT_INVALID", "Enrolled repository root is invalid."],
@@ -23,8 +25,15 @@ const OMITTED_KEYS = new Set([
   "environment",
 ]);
 
+const PUBLIC_PROOFWAKE_URN = /^urn:proofwake:(?:adapter|provider):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function digestIdentifier(namespace, value) {
+  const digest = createHash("sha256").update(String(value), "utf8").digest("hex");
+  return `urn:proofwake:${namespace}:sha256:${digest}`;
 }
 
 function safeProblemMessage(code) {
@@ -46,12 +55,34 @@ function safeProblem(problem) {
   return { code, message: safeProblemMessage(code) };
 }
 
+function publicHttpsUri(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.username === "" && url.password === "" &&
+      url.search === "" && url.hash === "";
+  } catch {
+    return false;
+  }
+}
+
 function safeEvidenceUri(reference) {
-  if (typeof reference.uri === "string" && /^(?:https|urn):/iu.test(reference.uri)) return reference.uri;
+  if (typeof reference.uri === "string" &&
+      (publicHttpsUri(reference.uri) || PUBLIC_PROOFWAKE_URN.test(reference.uri))) {
+    return reference.uri;
+  }
   if (typeof reference.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(reference.digest)) {
     return `urn:proofwake:evidence:${reference.digest}`;
   }
   return "urn:proofwake:evidence:content-excluded";
+}
+
+function safeObservationSource(value) {
+  if (PUBLIC_PROOFWAKE_URN.test(value)) return value;
+  if (publicHttpsUri(value)) {
+    const url = new URL(value);
+    if (url.hostname === "api.github.com") return value;
+  }
+  return digestIdentifier("source", value);
 }
 
 function safeEvidence(reference) {
@@ -97,6 +128,10 @@ function copy(value) {
   const result = {};
   for (const [key, nested] of Object.entries(value)) {
     if (OMITTED_KEYS.has(key)) continue;
+    if (key === "source" && typeof nested === "string" && /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(nested)) {
+      result[key] = safeObservationSource(nested);
+      continue;
+    }
     if (key === "policy") {
       result[key] = safePolicy(nested);
       continue;
