@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,10 +40,10 @@ test("installed doctor honours an explicit registry outside the data directory a
   const tokenPath = join(directory, "collector-token");
   const pricingPath = join(directory, "pricing.json");
   try {
-    await import("node:fs/promises").then(({ mkdir }) => Promise.all([
+    await Promise.all([
       mkdir(dataDirectory, { recursive: true }),
       mkdir(join(directory, "approved"), { recursive: true }),
-    ]));
+    ]);
     await writeFile(dataPath, "", { mode: 0o600 });
     await writeFile(defaultRegistryPath, '{"version":1,"defaultRegistrySentinel":true}\n', { mode: 0o600 });
     await writeFile(explicitRegistryPath, '{"version":1,"entries":[]}\n', { mode: 0o600 });
@@ -67,7 +67,7 @@ test("installed doctor honours an explicit registry outside the data directory a
     assert.equal(report.modules["fleet-readiness"].registry.entryCount, 0);
     assert.equal(result.stdout.includes("defaultRegistrySentinel"), false);
     await assert.rejects(access(tokenPath), (error) => error?.code === "ENOENT");
-    assert.equal(await import("node:fs/promises").then(({ readFile }) => readFile(defaultRegistryPath, "utf8")), '{"version":1,"defaultRegistrySentinel":true}\n');
+    assert.equal(await readFile(defaultRegistryPath, "utf8"), '{"version":1,"defaultRegistrySentinel":true}\n');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -80,7 +80,7 @@ test("installed doctor returns bounded JSON and a nonzero exit for an invalid re
   const pricingPath = join(directory, "pricing.json");
   try {
     await writeFile(dataPath, "", { mode: 0o600 });
-    await writeFile(registryPath, '{"version":1,"privateRegistryValue":"do-not-return-this"}\n', { mode: 0o600 });
+    await writeFile(registryPath, '{"version":1,"entries":[],"privateRegistryValue":"do-not-return-this"}\n', { mode: 0o600 });
     await writeFile(pricingPath, JSON.stringify(pricingCatalog), { mode: 0o600 });
 
     const result = runDoctor([
