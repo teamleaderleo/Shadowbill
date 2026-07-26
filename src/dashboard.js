@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 
 const ASSETS = new Map([
-  ["/dashboard/", { file: new URL("../dashboard/index.html", import.meta.url), contentType: "text/html; charset=utf-8" }],
+  ["/dashboard/", { file: new URL("../dashboard/index.html", import.meta.url), contentType: "text/html; charset=utf-8", noStore: true }],
+  ["/dashboard/estimates/", { file: new URL("../dashboard/estimates.html", import.meta.url), contentType: "text/html; charset=utf-8", noStore: true }],
+  ["/dashboard/estimates/index.html", { file: new URL("../dashboard/estimates.html", import.meta.url), contentType: "text/html; charset=utf-8", noStore: true }],
+  ["/dashboard/fleet.css", { file: new URL("../dashboard/fleet.css", import.meta.url), contentType: "text/css; charset=utf-8" }],
+  ["/dashboard/fleet.js", { file: new URL("../dashboard/fleet.js", import.meta.url), contentType: "text/javascript; charset=utf-8" }],
   ["/dashboard/dashboard.css", { file: new URL("../dashboard/dashboard.css", import.meta.url), contentType: "text/css; charset=utf-8" }],
   ["/dashboard/dashboard.js", { file: new URL("../dashboard/dashboard.js", import.meta.url), contentType: "text/javascript; charset=utf-8" }],
 ]);
@@ -26,6 +30,13 @@ export async function dashboardResponse(pathname) {
     return {
       status: 308,
       headers: { location: "/dashboard/", ...SECURITY_HEADERS, "cache-control": "no-store" },
+      body: Buffer.alloc(0),
+    };
+  }
+  if (pathname === "/dashboard/estimates") {
+    return {
+      status: 308,
+      headers: { location: "/dashboard/estimates/", ...SECURITY_HEADERS, "cache-control": "no-store" },
       body: Buffer.alloc(0),
     };
   }
@@ -54,7 +65,7 @@ export async function dashboardResponse(pathname) {
     headers: {
       "content-type": asset.contentType,
       "content-length": String(body.length),
-      "cache-control": pathname === "/dashboard/" ? "no-store" : "public, max-age=300",
+      "cache-control": asset.noStore ? "no-store" : "public, max-age=300",
       ...SECURITY_HEADERS,
     },
     body,
