@@ -141,7 +141,9 @@ test("fleet doctor reports committed policy drift and unsafe adapter replacement
     const registryStore = new RepositoryRegistryStore(registryPath);
     await enroll(registryStore, root);
 
-    await writeFile(join(root, ".proofwake.json"), `${JSON.stringify(policy("acme/drift", { lifecycle: "dormant" }), null, 2)}\n`);
+    const changedPolicy = policy("acme/drift");
+    changedPolicy.lifecycle.dormantAfterDays = 31;
+    await writeFile(join(root, ".proofwake.json"), `${JSON.stringify(changedPolicy, null, 2)}\n`);
     await git(root, "add", ".proofwake.json");
     await git(root, "commit", "-qm", "change policy");
     await writeFile(outside, "private-adapter-target-sentinel\n");
@@ -172,7 +174,7 @@ test("fleet doctor fails closed for corrupt, symlinked, and insecure registries"
   const linkPath = join(directory, "link.json");
   const insecurePath = join(directory, "insecure.json");
   try {
-    await writeFile(corruptPath, '{"version":1,"privateRegistrySentinel":true}\n');
+    await writeFile(corruptPath, '{"version":1,"entries":[],"privateRegistrySentinel":true}\n');
     const corrupt = await buildFleetDoctorReport({ registryPath: corruptPath, events: [] });
     assert.equal(corrupt.status, "error");
     assert.equal(byId(corrupt, "repository-registry").code, "REPOSITORY_REGISTRY_UNKNOWN_FIELD");
