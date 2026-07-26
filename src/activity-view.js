@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { observationFingerprint, validateObservation } from "./observation.js";
 
 const OBSERVATION_SCHEMA = "urn:proofwake:schema:observation:v1";
 const OBSERVATION_RECORD = "proofwake_observation";
@@ -23,7 +24,15 @@ function observationFromRecord(record) {
       typeof observation.type !== "string" || typeof observation.time !== "string" ||
       Number.isNaN(Date.parse(observation.time)) || new Date(observation.time).toISOString() !== observation.time ||
       !isObject(observation.data) || !isObject(observation.data.adapter) ||
-      !isObject(observation.data.relationships) || !Array.isArray(observation.data.facts)) {
+      !isObject(observation.data.relationships) || !Array.isArray(observation.data.facts) ||
+      !isObject(record.observationIdentity) || record.observationIdentity.source !== observation.source ||
+      record.observationIdentity.id !== observation.id || typeof record.requestFingerprint !== "string") {
+    return null;
+  }
+  try {
+    validateObservation(observation);
+    if (record.requestFingerprint !== observationFingerprint(observation)) return null;
+  } catch {
     return null;
   }
   return observation;
