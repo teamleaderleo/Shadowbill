@@ -100,12 +100,24 @@ function repositoryAttention(repository, item) {
   return null;
 }
 
+function stableRevisionContext(revision) {
+  if (!revision) return null;
+  return {
+    confidence: revision.confidence,
+    relationToCheckout: revision.relationToCheckout,
+    timestamp: revision.timestamp,
+    defaultBranch: revision.defaultBranch,
+    defaultBranchSelected: revision.defaultBranchSelected,
+    defaultBranchConfidence: revision.defaultBranchConfidence,
+  };
+}
+
 function contextualRepositoryCursor(repository, item) {
   const payload = {
     base: repository.sourceCursor,
     classification: repository.classification,
     status: repository.status,
-    revision: repository.revision,
+    revision: stableRevisionContext(repository.revision),
     problems: (item.problems ?? []).map((problem) => ({ code: problem.code, path: problem.path ?? null })),
     requiredSignals: repository.requiredSignals.map((signal) => ({ kind: signal.kind, state: signal.state, latest: signal.latest?.id ?? null })),
   };
@@ -116,10 +128,30 @@ function rank(status) {
   return { red: 0, yellow: 1, grey: 2, green: 3 }[status] ?? 4;
 }
 
+async function snapshotOptions(options) {
+  const [registry, events] = await Promise.all([
+    options.registryStore.read(),
+    options.eventStore.readAll(),
+  ]);
+  return {
+    ...options,
+    registryStore: { read: async () => registry },
+    eventStore: { readAll: async () => events },
+  };
+}
+
+function suppressStaleRecovery(repository) {
+  if (!repository.recentRecovery) return;
+  const kind = repository.recentRecovery.from?.kind;
+  const signal = repository.requiredSignals.find((candidate) => candidate.kind === kind);
+  if (signal && signal.state !== "passed") repository.recentRecovery = null;
+}
+
 export async function buildFleetProjection(options) {
+  const snapshot = await snapshotOptions(options);
   const [report, inventory] = await Promise.all([
-    buildRawFleetProjection(options),
-    buildRepositoryInventory(options),
+    buildRawFleetProjection(snapshot),
+    buildRepositoryInventory(snapshot),
   ]);
   const inventoryByIdentity = new Map(inventory.repositories.map((item) => [item.repository.identity, item]));
 
@@ -128,6 +160,7 @@ export async function buildFleetProjection(options) {
     repository.problems = item.problems ?? [];
     await enforceDefaultBranchAuthority(repository, item);
     repository.status = repositoryStatus(repository, item);
+    suppressStaleRecovery(repository);
     const currentFailure = repository.requiredSignals.find((signal) => signal.state === "failing") ?? null;
     const missingOrStale = repository.requiredSignals.find((signal) => INCOMPLETE_STATES.has(signal.state)) ?? null;
     repository.currentFailure = currentFailure
