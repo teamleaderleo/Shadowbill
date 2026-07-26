@@ -289,8 +289,8 @@ export function createProofwakeMcpSession(options) {
       if (message.method === "tools/call" && isObject(message.params) && TOOL_NAMES.has(message.params.name)) {
         const validation = await base.handle(message);
         if (validation === null) return null;
-        const toolNotFound = validation.error?.code === -32601 && validation.error?.message?.startsWith("Tool not found:");
-        if (!toolNotFound) return validation;
+        const unknownTool = validation.error?.code === -32601 && validation.error?.message?.startsWith("Unknown tool:");
+        if (!unknownTool) return validation;
         const result = await callEvidenceTool(message.params.name, message.params.arguments, options, registryStore);
         return rpcResult(message.id, result);
       }
