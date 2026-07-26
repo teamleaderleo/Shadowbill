@@ -5,6 +5,7 @@ import {
   activityEventFromObservationRecord,
   buildActivityReportView,
 } from "../src/activity-view.js";
+import { observationFingerprint } from "../src/observation.js";
 
 const REVISION = "a".repeat(40);
 
@@ -19,40 +20,43 @@ function observationRecord({ id, type, kind, status = "passed", facts = [], rela
   const repository = relationships.repository ?? "acme/repo";
   const revision = relationships.revision;
   const github = type.includes("github");
+  const observation = {
+    specversion: "1.0",
+    id: github ? `github-${githubEventName(type)}-${id}` : id,
+    source: github ? "urn:proofwake:provider:github" : "urn:proofwake:adapter:git",
+    type,
+    subject: revision ? `repo:${repository}@sha:${revision}` : `repo:${repository}`,
+    time: "2026-07-26T13:00:00.000Z",
+    dataschema: "urn:proofwake:schema:observation:v1",
+    data: {
+      schemaVersion: 1,
+      adapter: {
+        name: github ? "github" : "git",
+        version: "1.0.0",
+        mappingVersion: 1,
+        trust: github ? "signed-provider" : "local-operator",
+        sourceSchema: "activity.test",
+        sourceSchemaVersion: "1",
+      },
+      kind,
+      status,
+      timeSource: github ? "provider" : "producer",
+      observedAt: "2026-07-26T13:00:00.000Z",
+      ingestedAt: "2026-07-26T13:00:01.000Z",
+      ...(durationMs === undefined ? {} : { durationMs }),
+      relationships: { repository, ...relationships },
+      facts: facts.map(([name, value]) => ({ name, value })),
+      evidence: [],
+      coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
+    },
+  };
   return {
     type: "proofwake_observation",
     id: `record-${id}`,
-    timestamp: "2026-07-26T13:00:01.000Z",
-    observation: {
-      specversion: "1.0",
-      id: github ? `github-${githubEventName(type)}-${id}` : id,
-      source: github ? "urn:proofwake:provider:github" : "urn:proofwake:adapter:git",
-      type,
-      subject: revision ? `repo:${repository}@sha:${revision}` : `repo:${repository}`,
-      time: "2026-07-26T13:00:00.000Z",
-      dataschema: "urn:proofwake:schema:observation:v1",
-      data: {
-        schemaVersion: 1,
-        adapter: {
-          name: github ? "github" : "git",
-          version: "1.0.0",
-          mappingVersion: 1,
-          trust: github ? "signed-provider" : "local-operator",
-          sourceSchema: "activity.test",
-          sourceSchemaVersion: "1",
-        },
-        kind,
-        status,
-        timeSource: github ? "provider" : "producer",
-        observedAt: "2026-07-26T13:00:00.000Z",
-        ingestedAt: "2026-07-26T13:00:01.000Z",
-        ...(durationMs === undefined ? {} : { durationMs }),
-        relationships: { repository, ...relationships },
-        facts: facts.map(([name, value]) => ({ name, value })),
-        evidence: [],
-        coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
-      },
-    },
+    timestamp: observation.data.ingestedAt,
+    requestFingerprint: observationFingerprint(observation),
+    observationIdentity: { source: observation.source, id: observation.id },
+    observation,
   };
 }
 
@@ -169,7 +173,7 @@ test("observation activity replaces matching legacy deliveries exactly once", ()
   assert.equal(JSON.stringify(view).includes("private workflow name"), false);
 });
 
-test("unknown, malformed, or untrusted observations do not hide legacy activity", () => {
+test("unknown, malformed, untrusted, or unbound observations do not hide legacy activity", () => {
   const legacy = {
     type: "git_commit",
     id: "legacy",
@@ -187,8 +191,16 @@ test("unknown, malformed, or untrusted observations do not hide legacy activity"
     facts: [["github.workflow.rerun", false]],
   });
   untrusted.observation.data.adapter.trust = "untrusted-observation";
+  const unbound = observationRecord({
+    id: "unbound",
+    type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
+    kind: "github-ci",
+    relationships: { revision: REVISION, run: "github-workflow-2", workflowAttempt: 1 },
+    facts: [],
+  });
+  unbound.requestFingerprint = `sha256:${"0".repeat(64)}`;
 
-  assert.deepEqual(buildActivityReportView([legacy, unknown, malformed, untrusted]), [legacy]);
+  assert.deepEqual(buildActivityReportView([legacy, unknown, malformed, untrusted, unbound]), [legacy]);
 });
 
 test("malformed provider delivery and relationship identities fail closed", () => {
@@ -200,6 +212,8 @@ test("malformed provider delivery and relationship identities fail closed", () =
     facts: [],
   });
   badDelivery.observation.id = "github-workflow_run-bad delivery";
+  badDelivery.observationIdentity.id = badDelivery.observation.id;
+  badDelivery.requestFingerprint = observationFingerprint(badDelivery.observation);
   const badRun = observationRecord({
     id: "run-delivery",
     type: ACTIVITY_OBSERVATION_TYPES.githubWorkflowRun,
