@@ -5,6 +5,18 @@ import { RepositoryRegistryStore } from "./repository-registry.js";
 import { JsonlEventStore } from "./store.js";
 
 const REPOSITORY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
+const PUBLIC_RENDERPROVE_ERRORS = new Set([
+  "RENDERPROVE_REPOSITORY_UNKNOWN",
+  "RENDERPROVE_REPOSITORY_INVALID",
+  "RENDERPROVE_REPOSITORY_UNSUPPORTED",
+  "RENDERPROVE_ADAPTER_UNDECLARED",
+  "RENDERPROVE_SIGNAL_UNDECLARED",
+  "RENDERPROVE_REVISION_UNAVAILABLE",
+  "RENDERPROVE_REVISION_CONFLICT",
+  "RENDERPROVE_CHECKOUT_DIRTY",
+  "RENDERPROVE_CHECKOUT_CHANGED",
+  "RENDERPROVE_CLOCK_SKEW",
+]);
 
 export class AdapterCliUsageError extends Error {
   constructor(message) {
@@ -81,7 +93,7 @@ function parse(args) {
 
 function errorDetails(error) {
   const code = typeof error?.code === "string" ? error.code : "ADAPTER_INGEST_FAILED";
-  if (code.startsWith("RENDERPROVE_RECEIPT_") || code === "RENDERPROVE_UNKNOWN_FIELD") {
+  if (code.startsWith("RENDERPROVE_") && !PUBLIC_RENDERPROVE_ERRORS.has(code)) {
     return { code, message: "Renderprove receipt verification failed." };
   }
   const details = {
