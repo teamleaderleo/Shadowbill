@@ -1,7 +1,7 @@
 import { buildFleetProjection } from "./fleet-projection.js";
 import { buildRevisionProjection } from "./inspect-projection.js";
 
-const REPOSITORY_IDENTITY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
+const REPOSITORY_SELECTOR = /^[a-z0-9][a-z0-9._/-]{0,199}$/u;
 const FULL_REVISION = /^[a-f0-9]{40}$/u;
 
 const READ_ONLY_ANNOTATIONS = {
@@ -28,7 +28,7 @@ const FLEET_STATUS_TOOL = {
 const REPOSITORY_STATUS_TOOL = {
   name: "proofwake_repository_status",
   title: "Proofwake Repository Status",
-  description: "Read the current selected-revision evidence projection for one enrolled repository.",
+  description: "Read the current selected-revision evidence projection for one enrolled repository identity or display label.",
   inputSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -37,8 +37,10 @@ const REPOSITORY_STATUS_TOOL = {
     properties: {
       repository: {
         type: "string",
-        pattern: "^[a-z0-9](?:[a-z0-9._-]{0,99})/[a-z0-9](?:[a-z0-9._-]{0,99})$",
-        description: "Canonical lowercase owner/name repository identity.",
+        minLength: 1,
+        maxLength: 200,
+        pattern: "^[a-z0-9][a-z0-9._/-]{0,199}$",
+        description: "Bounded enrolled repository identity or local display label selector.",
       },
     },
   },
@@ -49,7 +51,7 @@ const REPOSITORY_STATUS_TOOL = {
 const REVISION_EVIDENCE_TOOL = {
   name: "proofwake_revision_evidence",
   title: "Proofwake Revision Evidence",
-  description: "Read the evidence projection for one explicit full repository revision.",
+  description: "Read the evidence projection for one explicit full revision selected by enrolled repository identity or display label.",
   inputSchema: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
@@ -58,8 +60,10 @@ const REVISION_EVIDENCE_TOOL = {
     properties: {
       repository: {
         type: "string",
-        pattern: "^[a-z0-9](?:[a-z0-9._-]{0,99})/[a-z0-9](?:[a-z0-9._-]{0,99})$",
-        description: "Canonical lowercase owner/name repository identity.",
+        minLength: 1,
+        maxLength: 200,
+        pattern: "^[a-z0-9][a-z0-9._/-]{0,199}$",
+        description: "Bounded enrolled repository identity or local display label selector.",
       },
       revision: {
         type: "string",
@@ -103,10 +107,10 @@ function validateFleetArguments(value) {
 }
 
 function validateRepository(value) {
-  if (typeof value !== "string" || !REPOSITORY_IDENTITY.test(value)) {
+  if (typeof value !== "string" || !REPOSITORY_SELECTOR.test(value)) {
     throw new ProofwakeMcpError(
       "PROOFWAKE_MCP_INVALID_REPOSITORY",
-      "repository must be a canonical lowercase owner/name identity.",
+      "repository must be a bounded enrolled identity or display label selector.",
     );
   }
   return value;
@@ -194,7 +198,7 @@ function registryError(error) {
 function projectionError(error) {
   if (error instanceof ProofwakeMcpError) return { code: error.code, message: error.message };
   const messages = new Map([
-    ["PROJECTION_REPOSITORY_REQUIRED", "Repository identity is required."],
+    ["PROJECTION_REPOSITORY_REQUIRED", "Repository selector is required."],
     ["PROJECTION_REPOSITORY_UNKNOWN", "Repository is not enrolled."],
     ["PROJECTION_INVALID_REVISION", "Revision must be a full lowercase SHA-1."],
     ["PROJECTION_REVISION_UNAVAILABLE", "Selected revision is unavailable."],
