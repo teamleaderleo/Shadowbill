@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { buildRevisionProjection as buildRawRevisionProjection } from "./revision-projection.js";
+import { inspectRepositoryEnrollment } from "./repository-enrollment.js";
 
 const ATTENTION_PRIORITY = [
   "failing",
@@ -82,9 +83,7 @@ function unavailableSignal(signal, reason) {
   };
 }
 
-function enforceDefaultBranchAuthority(report) {
-  if (report.revision.defaultBranchConfidence !== "conventional-current") return;
-  const reason = "Default-branch selection requires an explicit local remote HEAD.";
+function markDefaultBranchUnavailable(report, reason) {
   report.signals = report.signals.map((signal) =>
     signal.policy.subject === "revision" && signal.policy.appliesTo === "default-branch"
       ? unavailableSignal(signal, reason)
@@ -92,6 +91,38 @@ function enforceDefaultBranchAuthority(report) {
   report.revision.defaultBranch = null;
   report.revision.defaultBranchSelected = false;
   report.revision.defaultBranchConfidence = "unavailable";
+}
+
+async function enforceDefaultBranchAuthority(report, options) {
+  const hasDefaultBranchSignal = report.signals.some((signal) =>
+    signal.policy.subject === "revision" && signal.policy.appliesTo === "default-branch");
+  if (!hasDefaultBranchSignal) return;
+
+  if (report.revision.defaultBranchConfidence === "conventional-current") {
+    markDefaultBranchUnavailable(report, "Default-branch selection requires an explicit local remote HEAD.");
+    return;
+  }
+  if (report.revision.defaultBranchConfidence !== "remote-head") return;
+  if (report.repository.value.kind !== "remote") {
+    markDefaultBranchUnavailable(report, "Default-branch selection requires a verified remote repository identity.");
+    return;
+  }
+
+  try {
+    const registry = await options.registryStore.read();
+    const entry = registry.entries.find((candidate) => candidate.repository.identity === report.repository.identity);
+    if (!entry) throw new Error("registry entry unavailable");
+    const inspection = await inspectRepositoryEnrollment(entry.root, {
+      globalPolicy: entry.configuration.source === "global" ? entry.policy : undefined,
+      lifecycle: entry.policy.lifecycle.state,
+    });
+    const origin = inspection.remotes.find((remote) => remote.name === "origin");
+    if (origin?.repository !== report.repository.value.id) {
+      markDefaultBranchUnavailable(report, "The local origin remote HEAD does not belong to the enrolled repository identity.");
+    }
+  } catch {
+    markDefaultBranchUnavailable(report, "Default-branch remote identity could not be verified.");
+  }
 }
 
 function projectionStatus(report) {
@@ -139,7 +170,7 @@ function contextualCursor(report) {
 
 export async function buildRevisionProjection(options) {
   const report = await buildRawRevisionProjection(options);
-  enforceDefaultBranchAuthority(report);
+  await enforceDefaultBranchAuthority(report, options);
   report.status = projectionStatus(report);
   report.attention = projectionAttention(report);
   const timeline = firstGreenTimeline(report);
