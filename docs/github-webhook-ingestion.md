@@ -9,10 +9,11 @@ The raw request body is retained in memory only long enough to verify `X-Hub-Sig
 After successful verification, the collector:
 
 1. validates bounded `X-GitHub-Event` and `X-GitHub-Delivery` headers;
-2. parses one JSON object;
-3. captures one canonical `receivedAt` for the delivery, reusing the first accepted receipt time during replay;
-4. calls `mapGitHubWebhookObservation()` with `signatureVerified: true`;
-5. appends the mapped observation through `ObservationLedger`.
+2. decodes the body as fatal UTF-8 and parses one bounded strict JSON object;
+3. rejects duplicate keys, excessive nesting, excessive container sizes, and other strict-document failures with one fixed public error;
+4. captures one canonical `receivedAt` for the current delivery attempt without reading the ledger first;
+5. calls `mapGitHubWebhookObservation()` with `signatureVerified: true`;
+6. appends the mapped observation through `ObservationLedger`.
 
 One supported delivery produces one durable `proofwake_observation` record. The collector never writes a second legacy GitHub row. Existing legacy rows remain readable through the compatibility activity view and projection readers.
 
@@ -32,14 +33,17 @@ Unmerged pull requests, unsupported event families, and releases without suffici
 
 | Result | Status | Behaviour |
 |---|---:|---|
-| Invalid signature | `401` | Rejected before mapping or ledger access |
-| Malformed bounded headers or JSON payload | `400` | Bounded machine-readable error |
+| Invalid signature | `401` | Rejected before header parsing, strict JSON parsing, mapping, or ledger access |
+| Malformed bounded headers | `400` | Fixed machine-readable header error |
+| Invalid UTF-8, duplicate keys, malformed or excessive JSON | `400` | Fixed `GITHUB_WEBHOOK_INVALID_JSON` response |
+| Invalid mapped payload semantics | `400` | Bounded mapper code with fixed public prose |
 | Unsupported or authority-insufficient event | `202` | `accepted: true`, `ignored: true` |
 | New observation | `202` | `accepted: true`, `duplicate: false` |
-| Exact replay | `202` | `accepted: true`, `duplicate: true` |
+| Exact replay | `202` | `accepted: true`, `duplicate: true` after identity conflict and matching delivery digest |
 | Reused observation identity with changed semantics | `409` | `OBSERVATION_ID_CONFLICT` |
+| Ledger append or conflict-resolution read unavailable | `500` | Fixed `GITHUB_WEBHOOK_INGESTION_FAILED` response |
 
-Mapping and ingestion failures use stable bounded messages. Payload content and operating-system or ledger error prose are excluded from HTTP responses.
+The route does not read the ledger before mapping or append. Storage failures are never classified as invalid signed payloads. Mapping and ingestion failures use stable bounded messages; payload content and operating-system or ledger error prose are excluded from HTTP responses.
 
 ## Disclosure boundary
 
