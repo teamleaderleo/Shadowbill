@@ -4,6 +4,8 @@ import { ingestRenderproveReceipt } from "./renderprove-adapter.js";
 import { RepositoryRegistryStore } from "./repository-registry.js";
 import { JsonlEventStore } from "./store.js";
 
+const REPOSITORY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
+
 export class AdapterCliUsageError extends Error {
   constructor(message) {
     super(message);
@@ -67,6 +69,9 @@ function parse(args) {
     }
   }
   if (!options.help && !options.repository) throw new AdapterCliUsageError("ingest-adapter requires --repo owner/name.");
+  if (options.repository !== undefined && !REPOSITORY.test(options.repository)) {
+    throw new AdapterCliUsageError("--repo must use canonical lowercase owner/name form.");
+  }
   if (options.adapter !== "renderprove") throw new AdapterCliUsageError("Only the renderprove adapter is supported in adapter v1.");
   if (options.revision !== undefined && !/^[a-f0-9]{40}$/u.test(options.revision)) {
     throw new AdapterCliUsageError("--revision must be a full lowercase SHA-1.");
@@ -75,11 +80,17 @@ function parse(args) {
 }
 
 function errorDetails(error) {
+  const code = typeof error?.code === "string" ? error.code : "ADAPTER_INGEST_FAILED";
+  if (code.startsWith("RENDERPROVE_RECEIPT_") || code === "RENDERPROVE_UNKNOWN_FIELD") {
+    return { code, message: "Renderprove receipt verification failed." };
+  }
   const details = {
-    code: typeof error?.code === "string" ? error.code : "ADAPTER_INGEST_FAILED",
+    code,
     message: error instanceof Error ? error.message : String(error),
   };
-  if (typeof error?.path === "string") details.path = error.path;
+  if (typeof error?.path === "string" && /^\$(?:\.[A-Za-z][A-Za-z0-9-]*|\[\d+\])*$/u.test(error.path)) {
+    details.path = error.path;
+  }
   return details;
 }
 
