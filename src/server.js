@@ -6,6 +6,7 @@ import { dashboardResponse, isDashboardPath } from "./dashboard.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { buildFleetProjection } from "./fleet-projection.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
+import { buildFailureReport, buildRecoveryReport } from "./history-reports.js";
 import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
 import { buildRevisionProjection } from "./inspect-projection.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
@@ -72,6 +73,21 @@ function parseDays(value) {
   const days = Number(value);
   if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
     throw new HttpError(400, "days must be an integer between 1 and 365");
+  }
+  return days;
+}
+
+function parseHistoryDays(url) {
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((key) => key !== "days") || url.searchParams.getAll("days").length > 1) {
+    throw new Error("History report queries accept one days parameter.");
+  }
+  const value = url.searchParams.get("days");
+  if (value === null) return 30;
+  if (!/^\d+$/u.test(value)) throw new Error("days must be an integer between 1 and 365.");
+  const days = Number(value);
+  if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
+    throw new Error("days must be an integer between 1 and 365.");
   }
   return days;
 }
@@ -157,6 +173,20 @@ function projectionError(error, command) {
         message: error instanceof Error ? error.message : String(error),
       },
     },
+  };
+}
+
+function historyError(command, code) {
+  const message = code === "HISTORY_REPORT_REGISTRY_UNAVAILABLE"
+    ? "Repository registry is unavailable."
+    : code === "HISTORY_REPORT_INVALID_QUERY" || code === "HISTORY_REPORT_INVALID_DAYS"
+      ? "History report query is invalid."
+      : "History report generation failed.";
+  return {
+    service: "proofwake",
+    command,
+    status: "error",
+    error: { code, message },
   };
 }
 
@@ -267,6 +297,33 @@ export function createCollectorServer(options) {
         } catch (error) {
           const failure = projectionError(error, "inspect");
           sendJson(response, failure.status, failure.value);
+        }
+        return;
+      }
+
+      if (request.method === "GET" && (url.pathname === "/v1/failures" || url.pathname === "/v1/recoveries")) {
+        const command = url.pathname === "/v1/failures" ? "failures" : "recoveries";
+        if (!registryStore) {
+          sendJson(response, 503, historyError(command, "HISTORY_REPORT_REGISTRY_UNAVAILABLE"));
+          return;
+        }
+        let days;
+        try {
+          days = parseHistoryDays(url);
+        } catch {
+          sendJson(response, 400, historyError(command, "HISTORY_REPORT_INVALID_QUERY"));
+          return;
+        }
+        try {
+          const now = new Date();
+          const report = command === "failures"
+            ? await buildFailureReport({ registryStore, eventStore: options.store, days, now })
+            : await buildRecoveryReport({ registryStore, eventStore: options.store, days, now });
+          sendJson(response, 200, report);
+        } catch (error) {
+          const code = typeof error?.code === "string" ? error.code : "HISTORY_REPORT_HTTP_FAILED";
+          const status = code === "HISTORY_REPORT_INVALID_DAYS" ? 400 : 500;
+          sendJson(response, status, historyError(command, code));
         }
         return;
       }
