@@ -35,7 +35,6 @@ export function fullRevision(value, code = "ACTIVITY_OBSERVATION_INVALID_REVISIO
 
 export function optionalFullRevision(value, code = "ACTIVITY_OBSERVATION_INVALID_REVISION") {
   if (value === undefined || value === null || value === "" || value === "0".repeat(40)) return null;
-  if (typeof value === "string" && !/^[a-f0-9]+$/u.test(value)) return null;
   return fullRevision(value, code);
 }
 
