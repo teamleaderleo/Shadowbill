@@ -1,9 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import {
-  buildDoctorReport as buildEstimateDoctorReport,
-  doctorExitCode as estimateDoctorExitCode,
-} from "./doctor.js";
+import { buildDoctorReport as buildEstimateDoctorReport } from "./doctor.js";
 import { buildFleetDoctorReport } from "./fleet-doctor.js";
 
 function findingCode(id) {
@@ -11,10 +8,13 @@ function findingCode(id) {
 }
 
 function normalizeEstimateCheck(check) {
+  const details = { ...(check.details ?? {}) };
+  delete details.error;
   return {
     ...check,
     code: check.code ?? findingCode(check.id),
     component: check.component ?? "shadowbill-estimates",
+    details,
   };
 }
 
@@ -106,5 +106,3 @@ export function formatProofwakeDoctorReport(report) {
   }
   return lines.join("\n");
 }
-
-export { estimateDoctorExitCode };
