@@ -1,0 +1,18 @@
+{
+  "type": "git_commit",
+  "id": "legacy-private-id",
+  "timestamp": "2026-07-25T17:00:00Z",
+  "repository": "Owner/Repo",
+  "branch": "private/customer-fix",
+  "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "subject": "PRIVATE_COMMIT_SUBJECT_SENTINEL",
+  "body": "PRIVATE_COMMIT_BODY_SENTINEL",
+  "patch": "PRIVATE_PATCH_SENTINEL",
+  "paths": ["private/customer/account.js"],
+  "remote": "https://user:PRIVATE_CREDENTIAL_SENTINEL@github.com/Owner/Repo.git",
+  "additions": 12,
+  "deletions": 3,
+  "changedFiles": 2,
+  "addedCodeTokens": 41,
+  "collectorVersion": "0.3.0"
+}
