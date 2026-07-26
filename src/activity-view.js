@@ -6,7 +6,7 @@ const OBSERVATION_RECORD = "proofwake_observation";
 export const ACTIVITY_OBSERVATION_TYPES = Object.freeze({
   gitCommit: "dev.proofwake.git.commit.v1",
   githubPush: "dev.proofwake.github.push.v1",
-  githubPullRequest: "dev.proofwake.github.pull-request.v1",
+  githubPullRequest: "dev.proofwake.github.pull-request-merged.v1",
   githubWorkflowRun: "dev.proofwake.github.workflow-run.v1",
   githubDeploymentStatus: "dev.proofwake.github.deployment-status.v1",
 });
@@ -40,11 +40,6 @@ function factsOf(observation) {
   return facts;
 }
 
-function stringFact(facts, name, fallback = "") {
-  const value = facts.get(name);
-  return typeof value === "string" ? value : fallback;
-}
-
 function integerFact(facts, name, fallback = 0) {
   const value = facts.get(name);
   return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
@@ -65,6 +60,20 @@ function repositoryOf(observation) {
 function revisionOf(observation) {
   const revision = observation.data.relationships.revision;
   return typeof revision === "string" && /^[a-f0-9]{40}$/u.test(revision) ? revision : null;
+}
+
+function githubDeliveryId(observation, eventName) {
+  const prefix = `github-${eventName}-`;
+  if (!observation.id.startsWith(prefix)) return null;
+  const deliveryId = observation.id.slice(prefix.length);
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(deliveryId) ? deliveryId : null;
+}
+
+function relationshipInteger(relationships, name, prefix) {
+  const value = relationships[name];
+  if (typeof value !== "string" || !value.startsWith(prefix)) return null;
+  const integer = Number.parseInt(value.slice(prefix.length), 10);
+  return Number.isSafeInteger(integer) && integer >= 1 && `${prefix}${integer}` === value ? integer : null;
 }
 
 function eventId(observation) {
@@ -104,17 +113,18 @@ function mapGitCommit(observation, facts) {
     branch: "",
     sha: revision,
     subject: "",
-    additions: integerFact(facts, "git.additions"),
-    deletions: integerFact(facts, "git.deletions"),
-    changedFiles: integerFact(facts, "git.changed-files"),
-    addedCodeTokens: integerFact(facts, "git.added-code-tokens"),
+    additions: integerFact(facts, "git.commit.additions"),
+    deletions: integerFact(facts, "git.commit.deletions"),
+    changedFiles: integerFact(facts, "git.commit.changed-files"),
+    addedCodeTokens: integerFact(facts, "proofwake.retained-code-tokens"),
     collectorVersion: "observation-v1",
   };
 }
 
 function mapGitHubPush(observation, facts) {
   const repository = repositoryOf(observation);
-  if (!repository) return null;
+  const deliveryId = githubDeliveryId(observation, "push");
+  if (!repository || !deliveryId) return null;
   return {
     type: "github_push",
     id: eventId(observation),
@@ -122,47 +132,48 @@ function mapGitHubPush(observation, facts) {
     repository,
     ref: "",
     branch: "",
-    before: stringFact(facts, "github.push.before"),
-    after: stringFact(facts, "github.push.after", revisionOf(observation) ?? ""),
+    before: "",
+    after: revisionOf(observation) ?? "",
     commitCount: integerFact(facts, "github.push.commit-count"),
     created: booleanFact(facts, "github.push.created"),
     deleted: booleanFact(facts, "github.push.deleted"),
     forced: booleanFact(facts, "github.push.forced"),
-    deliveryId: observation.id,
+    deliveryId,
   };
 }
 
 function mapGitHubPullRequest(observation, facts) {
   const repository = repositoryOf(observation);
+  const revision = revisionOf(observation);
+  const deliveryId = githubDeliveryId(observation, "pull_request");
   const number = integerFact(facts, "github.pull-request.number", -1);
-  if (!repository || number < 0) return null;
+  if (!repository || !revision || !deliveryId || number < 1) return null;
   return {
     type: "github_pull_request",
     id: eventId(observation),
     timestamp: observation.time,
     repository,
-    action: stringFact(facts, "github.pull-request.action", "unknown"),
+    action: "closed",
     number,
-    state: stringFact(facts, "github.pull-request.state", "unknown"),
-    merged: booleanFact(facts, "github.pull-request.merged"),
-    draft: booleanFact(facts, "github.pull-request.draft"),
-    headSha: stringFact(facts, "github.pull-request.head-sha"),
-    baseSha: stringFact(facts, "github.pull-request.base-sha"),
-    mergeCommitSha: facts.has("github.pull-request.merge-commit-sha")
-      ? stringFact(facts, "github.pull-request.merge-commit-sha")
-      : null,
+    state: "closed",
+    merged: true,
+    draft: false,
+    headSha: "",
+    baseSha: "",
+    mergeCommitSha: revision,
     additions: integerFact(facts, "github.pull-request.additions"),
     deletions: integerFact(facts, "github.pull-request.deletions"),
     changedFiles: integerFact(facts, "github.pull-request.changed-files"),
-    deliveryId: observation.id,
+    deliveryId,
   };
 }
 
-function mapGitHubWorkflowRun(observation, facts) {
+function mapGitHubWorkflowRun(observation) {
   const repository = repositoryOf(observation);
-  const runId = integerFact(facts, "github.workflow-run.id", -1);
-  const headSha = stringFact(facts, "github.workflow-run.head-sha", revisionOf(observation) ?? "");
-  if (!repository || runId < 0) return null;
+  const revision = revisionOf(observation);
+  const deliveryId = githubDeliveryId(observation, "workflow_run");
+  const runId = relationshipInteger(observation.data.relationships, "run", "github-workflow-");
+  if (!repository || !revision || !deliveryId || runId === null) return null;
   const conclusion = workflowConclusion(observation.data.status);
   return {
     type: "github_workflow_run",
@@ -173,23 +184,24 @@ function mapGitHubWorkflowRun(observation, facts) {
     workflow: "",
     status: conclusion === null ? "in_progress" : "completed",
     conclusion,
-    headSha,
+    headSha: revision,
     runAttempt: Number.isSafeInteger(observation.data.relationships.workflowAttempt) &&
         observation.data.relationships.workflowAttempt >= 1
       ? observation.data.relationships.workflowAttempt
       : 1,
-    durationMs: facts.has("github.workflow-run.duration-ms")
-      ? integerFact(facts, "github.workflow-run.duration-ms")
+    durationMs: Number.isSafeInteger(observation.data.durationMs) && observation.data.durationMs >= 0
+      ? observation.data.durationMs
       : null,
-    deliveryId: observation.id,
+    deliveryId,
   };
 }
 
-function mapGitHubDeployment(observation, facts) {
+function mapGitHubDeployment(observation) {
   const repository = repositoryOf(observation);
-  const deploymentId = integerFact(facts, "github.deployment.id", -1);
-  const sha = stringFact(facts, "github.deployment.sha", revisionOf(observation) ?? "");
-  if (!repository || deploymentId < 0) return null;
+  const revision = revisionOf(observation);
+  const deliveryId = githubDeliveryId(observation, "deployment_status");
+  const deploymentId = relationshipInteger(observation.data.relationships, "deployment", "github-deployment-");
+  if (!repository || !revision || !deliveryId || deploymentId === null) return null;
   return {
     type: "github_deployment",
     id: eventId(observation),
@@ -198,9 +210,9 @@ function mapGitHubDeployment(observation, facts) {
     deploymentId,
     state: deploymentState(observation.data.status),
     environment: "",
-    sha,
+    sha: revision,
     ref: "",
-    deliveryId: observation.id,
+    deliveryId,
   };
 }
 
