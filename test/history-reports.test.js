@@ -29,7 +29,13 @@ function policy() {
         acceptedSources: ["adapter:renderprove"],
       },
     ],
-    adapters: [],
+    adapters: [{
+      name: "renderprove",
+      type: "receipt-file",
+      path: ".renderprove/receipt.json",
+      schema: "renderprove.receipt.v1",
+      trust: "verified-receipt",
+    }],
   };
 }
 
@@ -42,8 +48,9 @@ function registryStore() {
   };
 }
 
-function observation({ id, kind = "verify", status, observedAt, adapter = "local-command", coverage = "complete" }) {
+function observation({ id, kind = "verify", status, observedAt, adapter = "local-command", coverage = "complete", includeRevision = true }) {
   const ingestedAt = new Date(Date.parse(observedAt) + 1000).toISOString();
+  const relationships = { repository, run: id, ...(includeRevision ? { revision } : {}) };
   return {
     type: "proofwake_observation",
     id: `ledger-${id}`,
@@ -53,7 +60,7 @@ function observation({ id, kind = "verify", status, observedAt, adapter = "local
       id,
       source: `urn:proofwake:adapter:${adapter}`,
       type: `dev.proofwake.observation.${kind}.v1`,
-      subject: `repo:${repository}@sha:${revision}`,
+      subject: includeRevision ? `repo:${repository}@sha:${revision}` : `repo:${repository}`,
       time: observedAt,
       dataschema: "urn:proofwake:schema:observation:v1",
       data: {
@@ -71,7 +78,7 @@ function observation({ id, kind = "verify", status, observedAt, adapter = "local
         timeSource: "adapter",
         observedAt,
         ingestedAt,
-        relationships: { repository, revision, run: id },
+        relationships,
         facts: [],
         evidence: [{
           uri: `urn:test:${id}`,
@@ -109,6 +116,12 @@ test("failure report classifies resolved and unresolved policy-matched failures"
   assert.equal(report.failures.find((failure) => failure.id === "fail-two").unresolved, true);
   assert.equal(report.failures.find((failure) => failure.id === "optional-browser").policy.requirement, "optional");
   assert.equal(JSON.stringify(report).includes("ignored-source"), false);
+});
+
+test("revision-scoped signals ignore observations without revisions", async () => {
+  const events = [observation({ id: "repository-only", status: "failed", observedAt: "2026-07-23T11:00:00.000Z", includeRevision: false })];
+  const report = await buildFailureReport({ registryStore: registryStore(), eventStore: eventStore(events), days: 30, now });
+  assert.equal(report.summary.total, 0);
 });
 
 test("partial producer passes do not resolve failures", async () => {
@@ -150,6 +163,14 @@ test("window filtering uses recovery completion time and source cursor ignores d
   assert.equal(first.recoveries[0].to.id, "inside-pass");
   assert.equal(first.sourceCursor, second.sourceCursor);
   assert.deepEqual(first.recoveries, second.recoveries);
+});
+
+test("irrelevant observations do not change the source cursor", async () => {
+  const accepted = observation({ id: "accepted", status: "failed", observedAt: "2026-07-25T09:00:00.000Z" });
+  const ignored = observation({ id: "ignored", status: "failed", observedAt: "2026-07-25T10:00:00.000Z", adapter: "other" });
+  const first = await buildFailureReport({ registryStore: registryStore(), eventStore: eventStore([accepted]), days: 7, now });
+  const second = await buildFailureReport({ registryStore: registryStore(), eventStore: eventStore([accepted, ignored]), days: 7, now });
+  assert.equal(first.sourceCursor, second.sourceCursor);
 });
 
 test("invalid day ranges fail with a stable code", async () => {
