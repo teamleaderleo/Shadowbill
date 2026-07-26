@@ -271,8 +271,10 @@ export async function buildFleetDoctorReport(options) {
     }
   }
 
+  const registryChecks = checks.filter((entry) => entry.component === "registry");
   const repositoryChecks = checks.filter((entry) => entry.component === "repository");
-  const fleetStatus = registry === null
+  const registryUnavailable = registry === null || registryChecks.some((entry) => entry.status === "error");
+  const fleetStatus = registryUnavailable
     ? "error"
     : registry.entries.length === 0
       ? "warn"
