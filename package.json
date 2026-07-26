@@ -10,7 +10,7 @@
     "shadowbill": "./src/main.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "bash -o pipefail -c 'node --test test/*.test.js 2>&1 | tail -120'",
     "serve": "node src/cli.js serve",
     "report": "node src/cli.js report",
     "mcp": "node src/cli.js mcp",
