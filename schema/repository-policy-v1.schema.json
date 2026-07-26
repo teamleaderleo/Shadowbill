@@ -163,7 +163,17 @@
           "maxLength": 512,
           "pattern": "^(?!/)(?!.*[:\\s])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*[?*\\[\\]{}])(?!.*\\\\).+$"
         },
-        "schema": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "schema": {
+          "oneOf": [
+            { "$ref": "#/$defs/slug" },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?:https://(?![^/?#]*@)[^\\s]+|urn:[^\\s]+)$"
+            }
+          ]
+        },
         "trust": {
           "enum": [
             "local-operator",
