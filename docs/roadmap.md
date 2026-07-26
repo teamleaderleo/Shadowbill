@@ -1,228 +1,268 @@
 # Roadmap
 
-This roadmap turns the current Shadowbill implementation into Proofwake without discarding working code or breaking existing local data.
+This roadmap tracks the current Proofwake product rather than the order in which the Shadowbill experiment originally grew.
+
+Snapshot: 2026-07-26.
 
 ## Product objective
 
-Proofwake should become a local, standards-native evidence index that makes heterogeneous project receipts legible across a personal or small-team software fleet.
+Proofwake is a local evidence index for software projects. It collects bounded, content-minimised observations from local commands, Git, GitHub, CI, browser reviews, deployments, domain tools, and optional AI-usage estimates, then organises them by repository and revision.
 
-The initial success case is five unlike repositories with useful revision evidence, failure, recovery, staleness, and attention views.
+The initial success case is a five-repository pilot with useful evidence, failure, recovery, staleness, and attention views.
 
-## Milestone 0 — establish the project contract
+## Current product baseline
 
-Status: documentation and migration planning.
+The following capabilities are merged on `main`:
 
-- [x] Rename the GitHub repository to Proofwake.
-- [x] Define the product purpose, users, boundaries, and relationship with neighbouring tools.
-- [x] Choose Apache-2.0 and add the repository licence.
-- [x] Define the high-level architecture and standards position.
-- [ ] Complete the Shadowbill-to-Proofwake compatibility migration plan.
-- [ ] Add `proofwake` CLI and MCP aliases while preserving legacy entrypoints.
-- [ ] Update package, extension, dashboard, help text, examples, and documentation branding.
-- [ ] Define environment-variable precedence and deprecation output.
-- [ ] Define safe discovery or migration from `~/.shadowbill` to the eventual Proofwake data location.
-- [ ] Publish a first tagged release after the compatibility path is tested.
+- Proofwake is the primary package and CLI identity, with Shadowbill command, environment-variable, and data-path compatibility.
+- Observation v1 has a strict CloudEvents-compatible envelope, JSON Schema, bounded parser, canonical fingerprints, duplicate replay, and conflict rejection.
+- `proofwake emit` accepts one strict observation from a file or stdin through a hardened local boundary.
+- Repository policy v1 defines identity, lifecycle, expected signals, freshness, accepted sources, and bounded receipt-file adapters.
+- `proofwake enroll` and `proofwake repositories` provide dry-run-first enrolment and policy-aware fleet inventory.
+- `proofwake run` records bounded local command receipts tied to an exact repository revision while keeping raw arguments, environment values, stdout, and stderr outside the ledger.
+- `proofwake inspect` and `proofwake fleet` rebuild deterministic evidence projections with green, red, yellow, and grey states, source cursors, bounded history, and evidence-backed attention reasons.
+- The original Shadowbill estimate collector, reports, dashboard, diagnostics, Git/GitHub collection, and MCP tools remain available as an optional module.
 
-Exit criteria:
+The first native Renderprove receipt adapter is active work in issue #42 and pull request #63.
 
-- existing Shadowbill users keep access to their ledgers and commands;
-- new users encounter Proofwake terminology first;
-- project scope is understandable from the README and linked documents;
-- licensing is explicit.
+## Five-repository pilot
 
-## Milestone 1 — observation envelope and strict emitter
+| Repository | Role in the pilot | Initial evidence path | Stage |
+| --- | --- | --- | --- |
+| Proofwake | Self-observation and policy dogfood | local command receipts, Git/GitHub, policy checks | baseline available |
+| Renderprove | Browser-review producer | strict receipt v1 and screenshot digests | native adapter in progress |
+| SmolRunner | Runner and host-diagnostics producer | doctor, plan, and execution receipt summaries | fixture available; native adapter later |
+| Stensibly | Coordination consumer | evidence references and attention output | policy fixture available; integration later |
+| One More Legend | Unlike application workload | local verification and domain receipts | policy fixture available; pilot wiring later |
 
-Define the smallest durable v1 observation contract.
+The pilot succeeds when all five repositories can be enrolled and their expected evidence can be inspected without copying source, logs, secrets, prompts, or full external receipts into the ledger.
 
-- [ ] Map the common envelope to CloudEvents 1.0.
-- [ ] Map CI/CD event kinds to CDEvents where suitable.
-- [ ] Adopt OpenTelemetry VCS and CI/CD semantic attributes where suitable.
-- [ ] Define `proofwake.*` extensions for evidence coverage, disclosure, and repository policy.
-- [ ] Define source time, observed time, and ingestion time semantics.
-- [ ] Define source trust and disclosure classes.
-- [ ] Define stable failure codes.
-- [ ] Define event identity, request fingerprint, duplicate replay, and conflicting-key rejection.
-- [ ] Define maximum event, string, array, and evidence-reference sizes.
-- [ ] Add strict nested duplicate-key and non-standard-number rejection where JSON is accepted.
-- [ ] Implement `proofwake emit --json FILE` and `proofwake emit --stdin`.
-- [ ] Add deterministic fixtures and round-trip export tests.
+## Active lanes
 
-Exit criteria:
+### Lane A — finish the first native adapter
 
-- one local producer can emit a bounded event twice and receive one stored effect;
-- conflicting reuse of the same event identity fails visibly;
-- no arbitrary payload or content-bearing field reaches the ledger.
+Owner issue: #42. Active pull request: #63.
 
-## Milestone 2 — repository enrolment and fleet inventory
+- validate Renderprove receipt v1 and every declared screenshot digest;
+- bind evidence to one stable tracked checkout revision;
+- map review status, case identities, coverage, receipt digest, and artifact digests into observation v1;
+- keep URLs, page titles, diagnostics, commands, environment-adjacent values, and local paths outside the ledger;
+- prove replay, conflict, path, mutation, digest, and dirty-checkout behaviour.
 
-- [ ] Define `.proofwake.json` version 1.
-- [ ] Support explicit global registry entries for repositories that should not commit local configuration.
-- [ ] Validate repository identity, expected signals, staleness windows, and adapter paths.
-- [ ] Let autodetection propose configuration without silently approving it.
-- [ ] Add `proofwake enroll`, `proofwake repositories`, and `proofwake doctor` registry checks.
-- [ ] Classify enrolled repositories as active, dormant, misconfigured, or unobserved.
-- [ ] Show source freshness and coverage per repository.
+Exit: three unlike web applications expose independently verifiable browser-review evidence through Proofwake.
 
-Exit criteria:
+### Lane B — expose Proofwake-native read-only interfaces
 
-- five unlike repositories can be enrolled;
-- Proofwake reports which projects are active, dormant, or missing observations;
-- every policy conclusion names its configuration source.
+Owner issue: #43 plus a focused MCP child issue.
 
-## Milestone 3 — local command receipts
+- add read-only MCP tools for fleet status, repository status, and revision evidence;
+- reuse the same registry and ledger snapshot semantics as the CLI;
+- retain existing Shadowbill MCP tools as compatibility interfaces;
+- expose projection version, source cursor, policy source, evidence references, coverage, and degraded states;
+- add JSON and CSV exports after the report contracts settle.
 
-Implement the fastest broadly useful adapter.
+Exit: CLI and MCP return equivalent projections for the same registry and ledger snapshot.
 
-```text
-proofwake run --repo owner/name --kind verify -- npm test
-```
+### Lane C — build the fleet-first dashboard
 
-- [ ] Bind the command receipt to repository identity and current revision.
-- [ ] Record start, completion, duration, exit class, and cancellation.
-- [ ] Record a reviewed command identity without storing shell history or environment dumps.
-- [ ] Keep stdout and stderr out of the ledger by default.
-- [ ] Record bounded byte and line counts, truncation state, and optional external log reference.
-- [ ] Support declared artifact references with digest, size, and media type.
-- [ ] Preserve child exit behaviour with stable Proofwake-specific failure codes.
-- [ ] Add interruption, timeout, oversized-output, and nested invocation tests.
+Owner issue: #43.
 
-Exit criteria:
+- replace the cost-first home view with enrolled repositories and evidence attention;
+- show latest revision, current status, missing or stale required evidence, current failure, recent recovery, and source freshness;
+- make every conclusion inspectable through its policy and source observations;
+- isolate repository and panel failures;
+- preserve repository, revision, range, timezone, and view state in the URL;
+- keep Shadowbill estimates as a secondary view.
 
-- Node, Rust, and one additional repository can record local verification receipts;
-- raw source and command output remain excluded;
-- interrupted and failed runs remain useful observations.
+Exit: one screen answers what changed, what is failing, what is stale, and which repository needs attention.
 
-## Milestone 4 — Git and GitHub normalisation
+### Lane D — close core v1 follow-up debt
 
-- [ ] Migrate existing local Git events into the v1 envelope.
-- [ ] Preserve retained-code estimates as an optional measurement rather than the repository association authority.
-- [ ] Normalise push, pull-request, workflow-run, check, deployment, and release observations.
-- [ ] Track workflow attempt and rerun lineage.
-- [ ] Record signed webhook delivery health separately from domain event status.
-- [ ] Add historical backfill with explicit coverage windows and rate bounds.
-- [ ] Export compatible CDEvents where mappings are defined.
+- extend `proofwake doctor` with registry, policy, dual-data-path, and adapter-readiness checks;
+- add CloudEvents-compatible JSONL export fixtures;
+- add declared artifact references and external log references to local command receipts;
+- cover the child-completed-before-ledger-acknowledgement crash window;
+- define an explicit data migration command and release policy;
+- publish the first tagged Proofwake release.
 
-Exit criteria:
+### Lane E — normalise existing Git and GitHub observations
 
-- a repository revision can display commit, pull request, CI, and deployment observations in one timeline;
-- duplicate webhook delivery remains idempotent;
-- backfilled and live observations are visibly distinguished.
+- map existing local Git and signed GitHub events into observation v1;
+- preserve retained-code estimates as an optional measurement;
+- model workflow attempts and reruns consistently;
+- distinguish live and backfilled coverage;
+- add bounded historical backfill;
+- export CDEvents where the mapping is exact.
 
-## Milestone 5 — revision evidence projection
+## Milestone status
 
-This is the first core Proofwake product milestone.
+### Milestone 0 — identity and compatibility
 
-- [ ] Build per-revision expected-signal matrices.
-- [ ] Compute green, red, yellow, and grey state from declared policy.
-- [ ] Expose the exact observations behind every state.
-- [ ] Detect missing and stale expected signals.
-- [ ] Model failure-to-passing recovery intervals.
-- [ ] Identify repeated reruns and bounded flaky-outcome candidates.
-- [ ] Distinguish no evidence from failing evidence.
-- [ ] Rebuild projections deterministically from the ledger.
-- [ ] Add report coverage and projection-version metadata.
+Status: operational baseline delivered; release and explicit migration remain.
 
-Exit criteria:
+Delivered:
 
-- `proofwake inspect REVISION` answers which expected evidence exists and why;
-- `proofwake fleet` identifies current failures, missing evidence, and stale adapters;
-- no status relies on timestamp proximity as causality.
+- Proofwake package and CLI identity;
+- Shadowbill binary and environment aliases;
+- deterministic new-versus-legacy data-path selection;
+- refusal of ambiguous dual implicit ledgers;
+- Proofwake-first extension, dashboard, help, examples, and documentation;
+- read-only identity and path inspection.
 
-## Milestone 6 — first native adapter: Renderprove
+Remaining:
 
-Renderprove is the first native cross-project adapter because it already emits strict, bounded browser evidence receipts.
+- explicit restart-safe data migration;
+- alias support horizon;
+- first tagged release and release notes.
 
-- [ ] Validate receipt schema and supported versions.
-- [ ] Bind receipt identity, manifest identity, source revision, review cases, and policy result.
-- [ ] Index screenshots and diagnostics by reference and digest without copying them into the ledger.
-- [ ] Preserve disclosure and retention classes.
-- [ ] Distinguish receipt verification failure from browser policy failure.
-- [ ] Add fixtures from a simple public app, a stateful app, and a protected dashboard.
-- [ ] Report browser-review coverage in the revision evidence matrix.
+### Milestone 1 — observation envelope and strict emitter
 
-Exit criteria:
+Status: core v1 delivered.
 
-- three unlike web applications expose browser-review evidence through Proofwake;
-- a deliberately broken revision fails for the expected reason;
-- evidence references remain independently verifiable.
+Delivered:
 
-## Milestone 7 — fleet dashboard and read-only MCP
+- CloudEvents-compatible observation envelope;
+- time, repository, revision, relationship, trust, disclosure, coverage, evidence, and adapter contracts;
+- strict bounds, UTF-8, duplicate-key, unknown-field, depth, and non-finite-number rejection;
+- canonical semantic fingerprints;
+- source-scoped replay and conflicting-identity rejection;
+- `proofwake emit` with stable human and JSON output;
+- adversarial parser and file-boundary coverage.
 
-- [ ] Replace the cost-first dashboard home with fleet inventory and attention.
-- [ ] Show latest revision, age, evidence coverage, current failure, and source freshness.
-- [ ] Add repository evidence timelines.
-- [ ] Add failure and recovery views.
-- [ ] Add panel-local errors so one adapter cannot blank the whole dashboard.
-- [ ] Persist range, repository, revision, and timezone state in the URL.
-- [ ] Add JSON, JSONL, and CSV export.
-- [ ] Add read-only MCP tools for fleet, repository, revision, failure, and recovery reports.
-- [ ] Keep the existing Shadowbill estimates as an optional secondary view.
+Remaining:
 
-Exit criteria:
+- export fixtures and broader standards round trips;
+- migration mappings for every legacy event family.
 
-- one screen answers what changed, what is failing, what is stale, and what needs attention;
-- every recommendation links to source observations;
-- disabled or failing adapters degrade locally.
+### Milestone 2 — repository enrolment and fleet inventory
 
-## Milestone 8 — ecosystem adapters and exports
+Status: core v1 delivered.
 
-Add integrations only after the core projection proves useful.
+Delivered:
 
-- [ ] SmolRunner doctor, plan, and execution receipt summaries.
-- [ ] Starsector Preflight and other domain-receipt adapters.
-- [ ] SLSA and in-toto provenance indexing.
-- [ ] OpenLineage-style run import where appropriate.
-- [ ] OTLP export for compatible observations and metrics.
-- [ ] CDEvents import and export.
-- [ ] Optional Backstage card or plugin.
-- [ ] Optional Apache DevLake export or plugin.
-- [ ] Optional Stensibly evidence-reference adapter.
+- repository policy v1 and JSON Schema;
+- remote and privacy-preserving local identities;
+- active and dormant lifecycle intent;
+- expected signals, applicability, freshness, accepted sources, and receipt adapters;
+- committed and explicitly approved global policy sources;
+- dry-run-first enrolment and reviewed registry mutation;
+- policy-aware inventory with degraded repositories preserved.
 
-Exit criteria:
+Remaining:
 
-- Proofwake integrates with larger platforms without requiring them for local use;
-- adapter contracts remain narrow, versioned, and independently testable.
+- registry checks in `proofwake doctor`;
+- polished migration and recovery guidance for registry changes.
 
-## Milestone 9 — Shadowbill observation family
+### Milestone 3 — local command receipts
 
-Preserve the original experiment as an explicitly bounded module.
+Status: useful v1 delivered.
 
-- [ ] Rename UI and API presentation to “Shadowbill estimates” within Proofwake.
-- [ ] Keep pricing catalogs and calibration profiles versioned.
-- [ ] Mark every number as visible activity, API-equivalent estimate, or delivered-work indicator.
-- [ ] Remove any implication that an estimate represents provider internal cost or billing.
-- [ ] Evaluate compliant collection methods and keep unsupported collection outside the default product path.
-- [ ] Support complete disablement without reducing fleet evidence functionality.
+Delivered:
 
-Exit criteria:
+- shell-free argument-vector execution;
+- exact starting-revision and repository binding;
+- bounded stdout and stderr accounting with raw-output exclusion;
+- passing, warning, failure, timeout, cancellation, output-limit, signal, and spawn-failure receipts;
+- dirty-worktree, detached-HEAD, changed-revision, and post-inspection caveats;
+- stable run IDs for retry after response loss;
+- child exit preservation and machine-output isolation.
 
-- the original cost experiment remains available and honestly labelled;
-- Proofwake’s main value does not depend on AI-usage collection.
+Remaining:
+
+- declared artifact references;
+- external log references;
+- concurrent same-ID reservation;
+- process-group termination where supported;
+- crash recovery between child completion and ledger acknowledgement.
+
+### Milestone 4 — Git and GitHub normalisation
+
+Status: legacy collection works; observation-v1 normalisation remains.
+
+### Milestone 5 — revision evidence projection
+
+Status: projection v1 delivered.
+
+Delivered:
+
+- per-revision expected-signal matrices;
+- passing, failing, missing, stale, partial, unavailable, warning, and selector-unavailable states;
+- green, red, yellow, and grey repository status;
+- exact source observations, evidence references, coverage, trust, policy, and bounded history;
+- same-revision rerun recovery and verified descendant recovery;
+- deterministic registry-and-ledger snapshots, ordering, projection version, and source cursors;
+- panel-local degradation and score-free fleet attention.
+
+Remaining:
+
+- historical default-branch membership;
+- deployed-revision, release, host, service, and deployment selectors;
+- richer provider lineage, rename, transfer, force-push, and shallow-history behaviour;
+- persistent projection caches when scale requires them.
+
+### Milestone 6 — first native adapter: Renderprove
+
+Status: in progress in #63.
+
+### Milestone 7 — fleet dashboard and read-only MCP
+
+Status: next active product milestone.
+
+### Milestone 8 — ecosystem adapters and exports
+
+Status: later, after the fleet interface proves useful.
+
+Candidates:
+
+- SmolRunner doctor, plan, and execution receipt summaries;
+- Starsector Preflight and other domain receipts;
+- SLSA and in-toto provenance;
+- OpenLineage-style run import;
+- OTLP and CDEvents export;
+- optional Backstage and Apache DevLake integrations;
+- Stensibly evidence-reference integration.
+
+### Milestone 9 — Shadowbill observation family
+
+Status: maintained as an optional bounded module.
+
+- label every number as visible activity, API-equivalent estimate, or delivered-work indicator;
+- preserve versioned pricing and calibration assumptions;
+- support complete disablement without reducing fleet evidence functionality;
+- keep provider-internal cost and billing claims outside the product.
+
+## Recommended next three pull requests
+
+1. Finish and merge the Renderprove receipt adapter in #63.
+2. Add Proofwake-native read-only MCP tools for fleet, repository, and revision projections.
+3. Add a fleet-first dashboard baseline backed by the same projection output.
+
+Doctor/export debt and Git/GitHub normalisation can proceed beside these three when they touch separate files.
 
 ## Product quality bar
 
 Every adapter and user-facing feature must include:
 
-- exact trust and authority boundary;
-- schema and maximum sizes;
-- privacy and disclosure classification;
-- idempotency behaviour;
+- an exact authority and trust boundary;
+- a versioned schema and explicit maximum sizes;
+- privacy, disclosure, and retention behaviour;
+- idempotency and conflict behaviour;
 - stable machine-readable failures;
 - source coverage and freshness;
-- visible success and failure states;
-- degraded-mode behaviour;
-- fixtures from at least one real repository;
-- focused automated regression coverage;
-- migration behaviour for future schema changes.
+- visible passing, failing, missing, stale, partial, and unavailable states where relevant;
+- local degraded behaviour;
+- fixtures from a real or sanitised producer;
+- focused regression coverage;
+- a future schema migration path.
 
-## Explicit non-goals before the first stable release
+## Boundaries before the first stable release
 
-Do not build:
+Proofwake stays away from:
 
 - hosted public multi-tenancy;
 - arbitrary log ingestion;
-- a distributed tracing backend;
-- a generic metrics database;
+- distributed tracing storage;
+- generic metrics storage;
 - automated remediation;
 - CI scheduling;
 - task management;
@@ -230,17 +270,4 @@ Do not build:
 - employee or repository productivity scoring;
 - a universal DORA suite;
 - a new provenance or event standard;
-- raw prompt, response, source, or secret storage.
-
-## Suggested implementation order
-
-1. Compatibility naming migration
-2. Observation envelope and `emit`
-3. Repository registry
-4. Local command receipts
-5. GitHub normalisation
-6. Revision evidence projection
-7. Renderprove adapter
-8. Fleet dashboard and MCP
-9. Optional exports and native adapters
-10. Shadowbill module cleanup
+- raw prompt, response, source, log, secret, or environment storage.
