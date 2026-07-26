@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadOrCreateCollectorToken } from "./auth.js";
 import { buildDoctorReport, doctorExitCode, formatDoctorReport } from "./doctor.js";
 import { buildDailyReport, dateInTimeZone, DEFAULT_WORKING_PROFILE } from "./estimate.js";
+import { runProofwakeMcpStdioServer } from "./evidence-mcp.js";
 import { collectHeadCommit, installPostCommitHook } from "./git.js";
 import { DEFAULT_ALLOWED_HOSTS } from "./http-security.js";
 import {
@@ -12,7 +13,6 @@ import {
   resolveStorageIdentity,
   selectCompatibleEnvironment,
 } from "./identity.js";
-import { runShadowbillMcpStdioServer } from "./mcp.js";
 import { loadPricingCatalog } from "./pricing.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
@@ -271,7 +271,7 @@ async function main() {
 
   if (command === "mcp") {
     const allowWrites = process.argv.includes("--allow-writes") || mcpWritesEnvironment.value === "1";
-    await runShadowbillMcpStdioServer({ store, pricing, profile: DEFAULT_WORKING_PROFILE, timeZone, allowWrites });
+    await runProofwakeMcpStdioServer({ store, pricing, profile: DEFAULT_WORKING_PROFILE, timeZone, allowWrites });
     return;
   }
 
