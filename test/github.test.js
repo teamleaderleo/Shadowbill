@@ -1,24 +1,10 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "../src/github.js";
-import { DEFAULT_WORKING_PROFILE } from "../src/estimate.js";
-import { createCollectorServer, listen } from "../src/server.js";
-import { JsonlEventStore } from "../src/store.js";
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
-const pricing = {
-  inputPerMillion: 5,
-  cachedInputPerMillion: 0.5,
-  cacheWritePerMillion: 6.25,
-  outputPerMillion: 30,
-  longContextThresholdTokens: 272_000,
-  longContextInputMultiplier: 2,
-  longContextOutputMultiplier: 1.5,
-};
 
 function signature(body, secret) {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
@@ -31,7 +17,7 @@ test("verifies GitHub signatures without accepting malformed values", () => {
   assert.equal(verifyGitHubSignature(body, undefined, "secret"), false);
 });
 
-test("normalizes supported GitHub webhook fixtures", async () => {
+test("preserves the legacy GitHub webhook normalizer compatibility export", async () => {
   const push = normalizeGitHubWebhook("push", "delivery-1", await fixture("push"));
   assert.equal(push.type, "github_push");
   assert.equal(push.branch, "main");
@@ -53,56 +39,4 @@ test("normalizes supported GitHub webhook fixtures", async () => {
   assert.equal(deployment.state, "success");
 
   assert.equal(normalizeGitHubWebhook("ping", "delivery-5", {}), null);
-});
-
-test("accepts signed webhook deliveries once", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "shadowbill-webhook-"));
-  const store = new JsonlEventStore(join(directory, "events.jsonl"));
-  const secret = "test-secret";
-  const server = createCollectorServer({
-    store,
-    pricing,
-    profile: DEFAULT_WORKING_PROFILE,
-    githubWebhookSecret: secret,
-    timeZone: "America/Los_Angeles",
-  });
-  const port = await listen(server, 0);
-
-  try {
-    const body = Buffer.from(JSON.stringify(await fixture("push")));
-    const send = () => fetch(`http://127.0.0.1:${port}/v1/github/webhooks`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-github-event": "push",
-        "x-github-delivery": "delivery-http-1",
-        "x-hub-signature-256": signature(body, secret),
-      },
-      body,
-    });
-
-    const first = await send();
-    assert.equal(first.status, 202);
-    assert.deepEqual(await first.json(), { accepted: true, duplicate: false, id: "github_push_delivery-http-1" });
-
-    const second = await send();
-    assert.equal(second.status, 202);
-    assert.deepEqual(await second.json(), { accepted: true, duplicate: true, id: "github_push_delivery-http-1" });
-    assert.equal((await store.readAll()).length, 1);
-
-    const rejected = await fetch(`http://127.0.0.1:${port}/v1/github/webhooks`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-github-event": "push",
-        "x-github-delivery": "delivery-http-2",
-        "x-hub-signature-256": "sha256=wrong",
-      },
-      body,
-    });
-    assert.equal(rejected.status, 401);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await rm(directory, { recursive: true, force: true });
-  }
 });

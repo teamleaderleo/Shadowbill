@@ -26,7 +26,7 @@ node src/cli.js serve --allowed-hosts 'shadowbill.example,shadowbill.internal:84
 
 Malformed entries stop the collector during startup. Keep this list narrow. A proxy can instead rewrite `Host` to `127.0.0.1`, which works with the default configuration.
 
-The listener remains loopback-only. A hosted GitHub webhook setup should terminate TLS at the proxy and forward only `/v1/github/webhooks`.
+The listener remains loopback-only. A hosted GitHub webhook setup should terminate TLS at the proxy and forward only `/v1/github/webhooks`. The signature authority, observation write, replay, conflict, and disclosure contracts are documented in [`github-webhook-ingestion.md`](github-webhook-ingestion.md).
 
 ## Browser cross-origin access
 

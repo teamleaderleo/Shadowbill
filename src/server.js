@@ -5,10 +5,12 @@ import { verifyBearerAuthorization } from "./auth.js";
 import { dashboardResponse, isDashboardPath } from "./dashboard.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
 import { buildFleetProjection } from "./fleet-projection.js";
-import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
+import { mapGitHubWebhookObservation } from "./github-observation.js";
+import { verifyGitHubSignature } from "./github.js";
 import { buildFailureReport, buildRecoveryReport } from "./history-reports.js";
 import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
 import { buildRevisionProjection } from "./inspect-projection.js";
+import { ObservationLedger } from "./observation-ledger.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
 import { RepositoryRegistryStore } from "./repository-registry.js";
@@ -28,6 +30,9 @@ const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
 const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
 const PROJECTION_REPOSITORY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
 const PROJECTION_REVISION = /^[a-f0-9]{40}$/u;
+const GITHUB_EVENT_NAME = /^[a-z][a-z0-9_]{0,63}$/u;
+const GITHUB_DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const GITHUB_OBSERVATION_SOURCE = "urn:proofwake:provider:github";
 
 function sendJson(response, status, value, headers = {}) {
   response.writeHead(status, {
@@ -196,6 +201,53 @@ function resolveRegistryStore(options) {
   return new RepositoryRegistryStore(join(dirname(options.store.path), "repositories.json"));
 }
 
+function singleHeader(value) {
+  return typeof value === "string" ? value : null;
+}
+
+function githubWebhookFailure(code, message) {
+  return { accepted: false, error: { code, message } };
+}
+
+function boundedGitHubMappingError(error) {
+  const code = typeof error?.code === "string" &&
+      (error.code.startsWith("GITHUB_OBSERVATION_") || error.code.startsWith("ACTIVITY_OBSERVATION_"))
+    ? error.code
+    : "GITHUB_WEBHOOK_INVALID_PAYLOAD";
+  return githubWebhookFailure(code, "GitHub webhook payload is invalid.");
+}
+
+function canonicalNow(options) {
+  const value = typeof options.now === "function" ? options.now() : new Date();
+  const time = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(time.getTime()) ? new Date().toISOString() : time.toISOString();
+}
+
+function githubObservationId(eventName, deliveryId) {
+  return `github-${eventName}-${deliveryId}`;
+}
+
+function matchingGitHubObservation(events, eventName, deliveryId) {
+  const id = githubObservationId(eventName, deliveryId);
+  return events.find((entry) => entry?.type === "proofwake_observation" &&
+    entry.observationIdentity?.source === GITHUB_OBSERVATION_SOURCE &&
+    entry.observationIdentity?.id === id) ?? null;
+}
+
+async function canonicalGitHubReceivedAt(options, eventName, deliveryId) {
+  const captured = canonicalNow(options);
+  const events = await options.store.readAll();
+  const existing = matchingGitHubObservation(events, eventName, deliveryId);
+  const observedAt = existing?.observation?.data?.observedAt;
+  return typeof observedAt === "string" && !Number.isNaN(Date.parse(observedAt)) ? observedAt : captured;
+}
+
+function sameGitHubDelivery(existing, observation) {
+  const existingDigest = existing?.observation?.data?.evidence?.[0]?.digest;
+  const candidateDigest = observation?.data?.evidence?.[0]?.digest;
+  return typeof existingDigest === "string" && existingDigest === candidateDigest;
+}
+
 export function createCollectorServer(options) {
   const allowedHosts = normalizeAllowedHosts(options.allowedHosts);
   const registryStore = resolveRegistryStore(options);
@@ -349,46 +401,88 @@ export function createCollectorServer(options) {
 
       if (request.method === "POST" && url.pathname === "/v1/github/webhooks") {
         if (!options.githubWebhookSecret) {
-          sendJson(response, 503, { error: "GitHub webhook ingestion requires a configured secret" });
+          sendJson(response, 503, githubWebhookFailure(
+            "GITHUB_WEBHOOK_SECRET_REQUIRED",
+            "GitHub webhook ingestion requires a configured secret.",
+          ));
           return;
         }
 
         const body = await readBody(request, 2_000_000);
-        const signature = request.headers["x-hub-signature-256"];
-        if (!verifyGitHubSignature(body, Array.isArray(signature) ? signature[0] : signature, options.githubWebhookSecret)) {
-          sendJson(response, 401, { error: "Invalid GitHub webhook signature" });
+        const signature = singleHeader(request.headers["x-hub-signature-256"]);
+        if (!verifyGitHubSignature(body, signature ?? undefined, options.githubWebhookSecret)) {
+          sendJson(response, 401, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_SIGNATURE",
+            "Invalid GitHub webhook signature.",
+          ));
           return;
         }
 
-        const eventNameHeader = request.headers["x-github-event"];
-        const deliveryHeader = request.headers["x-github-delivery"];
-        const eventName = Array.isArray(eventNameHeader) ? eventNameHeader[0] : eventNameHeader;
-        const deliveryId = Array.isArray(deliveryHeader) ? deliveryHeader[0] : deliveryHeader;
-        if (!eventName || !deliveryId) {
-          sendJson(response, 400, { error: "Missing GitHub event or delivery header" });
+        const eventName = singleHeader(request.headers["x-github-event"]);
+        const deliveryId = singleHeader(request.headers["x-github-delivery"]);
+        if (!eventName || !GITHUB_EVENT_NAME.test(eventName) || !deliveryId || !GITHUB_DELIVERY_ID.test(deliveryId)) {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_HEADERS",
+            "GitHub event and delivery headers are required and must be bounded tokens.",
+          ));
           return;
         }
 
         const payload = parseJson(body);
-        if (!payload) {
-          sendJson(response, 400, { error: "Invalid GitHub webhook JSON" });
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          sendJson(response, 400, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INVALID_JSON",
+            "GitHub webhook JSON must be an object.",
+          ));
           return;
         }
 
-        let event;
+        let observation;
         try {
-          event = normalizeGitHubWebhook(eventName, deliveryId, payload);
+          const receivedAt = await canonicalGitHubReceivedAt(options, eventName, deliveryId);
+          observation = mapGitHubWebhookObservation(eventName, deliveryId, payload, {
+            signatureVerified: true,
+            receivedAt,
+          });
         } catch (error) {
-          sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
-          return;
-        }
-        if (!event) {
-          sendJson(response, 202, { accepted: false, ignored: true, event: eventName });
+          sendJson(response, 400, boundedGitHubMappingError(error));
           return;
         }
 
-        const inserted = await options.store.append(event);
-        sendJson(response, 202, { accepted: true, duplicate: !inserted, id: event.id });
+        if (!observation) {
+          sendJson(response, 202, { accepted: true, ignored: true, event: eventName });
+          return;
+        }
+
+        try {
+          const result = await new ObservationLedger(options.store).append(observation);
+          sendJson(response, 202, {
+            accepted: true,
+            duplicate: result.status === "duplicate",
+            id: observation.id,
+          });
+        } catch (error) {
+          if (error?.code === "OBSERVATION_ID_CONFLICT") {
+            try {
+              const existing = matchingGitHubObservation(await options.store.readAll(), eventName, deliveryId);
+              if (sameGitHubDelivery(existing, observation)) {
+                sendJson(response, 202, { accepted: true, duplicate: true, id: observation.id });
+                return;
+              }
+            } catch {
+              // Preserve the bounded conflict response below.
+            }
+            sendJson(response, 409, githubWebhookFailure(
+              "OBSERVATION_ID_CONFLICT",
+              "Observation identity was reused with different semantics.",
+            ));
+            return;
+          }
+          sendJson(response, 500, githubWebhookFailure(
+            "GITHUB_WEBHOOK_INGESTION_FAILED",
+            "GitHub webhook ingestion failed.",
+          ));
+        }
         return;
       }
 
