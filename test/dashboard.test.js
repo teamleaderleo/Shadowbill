@@ -44,12 +44,15 @@ test("dashboard redirects to a canonical same-origin route", async () => {
       assert.equal(response.headers.get("access-control-allow-origin"), null);
       assert.equal(response.headers.get("x-frame-options"), "DENY");
     }
+    const estimates = await fetch(`${url}/dashboard/estimates`, { redirect: "manual" });
+    assert.equal(estimates.status, 308);
+    assert.equal(estimates.headers.get("location"), "/dashboard/estimates/");
   });
 });
 
-test("dashboard assets are local, typed, and locked to the collector origin", async () => {
+test("estimate dashboard assets are local, typed, and locked to the collector origin", async () => {
   await withServer(async (url) => {
-    const htmlResponse = await fetch(`${url}/dashboard/`);
+    const htmlResponse = await fetch(`${url}/dashboard/estimates/`);
     assert.equal(htmlResponse.status, 200);
     assert.match(htmlResponse.headers.get("content-type"), /^text\/html/);
     assert.equal(htmlResponse.headers.get("access-control-allow-origin"), null);
@@ -66,6 +69,7 @@ test("dashboard assets are local, typed, and locked to the collector origin", as
     const html = await htmlResponse.text();
     assert.match(html, /\/dashboard\/dashboard\.css/);
     assert.match(html, /\/dashboard\/dashboard\.js/);
+    assert.match(html, /href="\/dashboard\/"/);
     assert.doesNotMatch(html, /https?:\/\//i);
     assert.doesNotMatch(html, /<script[^>]+src=["']\/\//i);
 
