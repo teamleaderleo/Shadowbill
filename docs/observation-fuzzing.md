@@ -4,7 +4,7 @@ Proofwake includes a deterministic, dependency-free mutation harness for the obs
 
 ```bash
 node scripts/fuzz-observation-cli.mjs
-node scripts/fuzz-observation-cli.mjs 512 20260726
+node scripts/fuzz-observation-cli.mjs 80 20260726
 ```
 
 The optional arguments are:
@@ -24,23 +24,21 @@ The command first submits one valid observation to prove the selected executable
 
 The corpus covers:
 
-- top-level and nested duplicate keys;
+- duplicate keys at top-level and nested depths;
 - unknown fields;
-- trailing content and invalid escapes;
-- excessive nesting and input bytes;
-- subject/revision conflicts;
-- invalid enum and token values;
-- duplicate fact names;
+- malformed JSON and trailing content;
+- excessive input bytes and nesting depth;
+- relationship conflicts;
+- invalid subjects, timestamps, identifiers, enum values, and token values;
 - malformed evidence digests;
-- coverage shape violations;
-- oversized identifiers;
-- invalid timestamps and types;
-- non-finite numeric input;
-- missing required fields.
+- duplicate facts;
+- wrong container types;
+- missing required fields;
+- non-finite numbers.
 
-Every mutation uses a fresh ledger. A semantically valid mutation therefore cannot hide behind an idempotency conflict from another case. The first pass walks each operator in order; additional iterations use the seeded generator. CI asserts that every declared operator ran at least once.
+Every mutation uses a fresh ledger. A semantically valid mutation therefore cannot hide behind an idempotency conflict from another case. The first pass walks each operator in order; additional iterations use the seeded generator. The harness fails whenever any declared operator has zero hits, including runs whose iteration count is too small to cover the corpus.
 
-CI runs a fixed seed and records operator hits plus the observed error-code distribution. The seed and iteration count make failures reproducible locally. This harness complements focused parser unit tests; it does not replace schema-specific assertions or external coverage-guided fuzzers.
+CI runs 80 mutations with seed `20260726`. The JSON summary reports `mutationOperators`, `operatorsExercised`, `selectedOperatorIndexes`, `missingOperatorIndexes`, per-operator hit counts, and the observed error-code distribution. The seed and iteration count make failures reproducible locally. The legacy `operatorCount` and `exercisedOperators` fields remain aliases for compatibility. This harness complements focused parser unit tests; it does not replace schema-specific assertions or external coverage-guided fuzzers.
 
 When adding a mutation operator:
 
