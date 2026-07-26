@@ -67,6 +67,18 @@ test("adapter schema identifiers accept stable tokens, HTTPS URLs, and URNs", as
     });
     assert.equal(normalized.adapters[0].schema, schema);
   }
+
+  const normalizedHttps = validateRepositoryPolicy({
+    ...policy,
+    adapters: [{ ...policy.adapters[0], schema: "HTTPS://Schemas.Example.com/renderprove/receipt-v1.json" }],
+  });
+  assert.equal(normalizedHttps.adapters[0].schema, "https://schemas.example.com/renderprove/receipt-v1.json");
+
+  const normalizedUrn = validateRepositoryPolicy({
+    ...policy,
+    adapters: [{ ...policy.adapters[0], schema: "URN:renderprove:schema:receipt:v1" }],
+  });
+  assert.equal(normalizedUrn.adapters[0].schema, "urn:renderprove:schema:receipt:v1");
 });
 
 test("published schema mirrors the runtime URI allowlist", async () => {
@@ -77,6 +89,8 @@ test("published schema mirrors the runtime URI allowlist", async () => {
   const uriPattern = new RegExp(schemaRule.oneOf[1].pattern, "u");
   assert.match("https://schemas.example.com/receipt-v1.json", uriPattern);
   assert.match("urn:renderprove:schema:receipt:v1", uriPattern);
+  assert.match("HTTPS://Schemas.Example.com/receipt-v1.json", uriPattern);
+  assert.match("URN:renderprove:schema:receipt:v1", uriPattern);
   assert.doesNotMatch("file:///home/operator/private/schema.json", uriPattern);
   assert.doesNotMatch("http://example.com/schema.json", uriPattern);
   assert.doesNotMatch("https://operator:secret@example.com/schema.json", uriPattern);
