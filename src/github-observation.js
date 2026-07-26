@@ -12,6 +12,7 @@ import {
 } from "./activity-observation.js";
 
 const SUPPORTED_EVENTS = new Set(["push", "pull_request", "workflow_run", "deployment_status", "release"]);
+const FULL_REVISION = /^[a-f0-9]{40}$/u;
 const ADAPTER = Object.freeze({
   name: "github",
   version: "1.0.0",
@@ -42,17 +43,7 @@ function optionalCount(value, factName, field) {
   return count === undefined ? null : { name: factName, value: count };
 }
 
-function retainedCodeFact(options) {
-  const count = nonNegativeInteger(
-    options.retainedCodeTokens,
-    "GITHUB_OBSERVATION_INVALID_RETAINED_CODE",
-    "retainedCodeTokens",
-    { optional: true },
-  );
-  return count === undefined ? null : { name: "proofwake.retained-code-tokens", value: count };
-}
-
-function base({ eventName, deliveryId, payload, times, type, subject, kind, status, durationMs, relationships, facts, omitted }) {
+function base({ eventName, deliveryId, payload, times, type, subject, kind, status, timeSource = "provider", durationMs, relationships, facts, omitted }) {
   return createActivityObservation({
     id: `github-${eventName}-${deliveryId}`,
     source: "urn:proofwake:provider:github",
@@ -62,7 +53,7 @@ function base({ eventName, deliveryId, payload, times, type, subject, kind, stat
     adapter: ADAPTER,
     kind,
     status,
-    timeSource: "provider",
+    timeSource,
     observedAt: times.observedAt,
     ingestedAt: times.ingestedAt,
     durationMs,
@@ -76,7 +67,8 @@ function base({ eventName, deliveryId, payload, times, type, subject, kind, stat
 function mapPush(deliveryId, payload, options) {
   const repo = repository(payload);
   const revision = optionalFullRevision(payload.after, "GITHUB_OBSERVATION_INVALID_REVISION");
-  const sourceTime = payload?.head_commit?.timestamp ?? options.receivedAt;
+  const providerTimeAvailable = typeof payload?.head_commit?.timestamp === "string";
+  const sourceTime = providerTimeAvailable ? payload.head_commit.timestamp : options.receivedAt;
   const times = providerTimes(sourceTime, options);
   const commitCount = payload.size === undefined
     ? Array.isArray(payload.commits) ? payload.commits.length : 0
@@ -86,8 +78,7 @@ function mapPush(deliveryId, payload, options) {
     { name: "github.push.created", value: Boolean(payload.created) },
     { name: "github.push.deleted", value: Boolean(payload.deleted) },
     { name: "github.push.forced", value: Boolean(payload.forced) },
-    retainedCodeFact(options),
-  ].filter(Boolean);
+  ];
   const relationships = revision ? { repository: repo, revision } : { repository: repo };
   return base({
     eventName: "push",
@@ -98,6 +89,7 @@ function mapPush(deliveryId, payload, options) {
     subject: revision ? `repo:${repo}@sha:${revision}` : `repo:${repo}`,
     kind: "verify",
     status: "passed",
+    timeSource: providerTimeAvailable ? "provider" : "adapter",
     relationships,
     facts,
     omitted: [
@@ -127,7 +119,6 @@ function mapPullRequest(deliveryId, payload, options) {
     optionalCount(pullRequest.additions, "github.pull-request.additions", "pull_request.additions"),
     optionalCount(pullRequest.deletions, "github.pull-request.deletions", "pull_request.deletions"),
     optionalCount(pullRequest.changed_files, "github.pull-request.changed-files", "pull_request.changed_files"),
-    retainedCodeFact(options),
   ].filter(Boolean);
   return base({
     eventName: "pull_request",
@@ -275,8 +266,9 @@ function mapRelease(deliveryId, payload, options) {
     "GitHub release payload is missing release.",
   );
   if (payload.action !== "published" || release.draft === true) return null;
-  const revision = optionalFullRevision(release.target_commitish, "GITHUB_OBSERVATION_INVALID_REVISION");
-  if (revision === null || typeof release.published_at !== "string") return null;
+  if (typeof release.target_commitish !== "string" || !FULL_REVISION.test(release.target_commitish)) return null;
+  if (typeof release.published_at !== "string") return null;
+  const revision = release.target_commitish;
   const repo = repository(payload);
   const releaseId = nonNegativeInteger(release.id, "GITHUB_OBSERVATION_INVALID_RELEASE", "release.id", { minimum: 1 });
   const times = providerTimes(release.published_at, options);
@@ -317,7 +309,7 @@ function mapRelease(deliveryId, payload, options) {
  * @param {string} eventName
  * @param {string} deliveryId
  * @param {Record<string, unknown>} payload
- * @param {{signatureVerified: boolean, receivedAt: string, ingestedAt?: string, retainedCodeTokens?: number}} options
+ * @param {{signatureVerified: boolean, receivedAt: string, ingestedAt?: string}} options
  */
 export function mapGitHubWebhookObservation(eventName, deliveryId, payload, options = {}) {
   if (!SUPPORTED_EVENTS.has(eventName)) return null;
