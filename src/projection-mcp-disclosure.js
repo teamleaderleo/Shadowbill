@@ -23,6 +23,12 @@ const OMITTED_KEYS = new Set([
   "environment",
 ]);
 
+const ABSOLUTE_URI = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
+const SAFE_DIGEST = /^sha256:[a-f0-9]{64}$/u;
+const SAFE_ADAPTER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const REVIEWED_SOURCE_URI = /^urn:proofwake:adapter:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const REVIEWED_EVIDENCE_URN = /^(?:urn:proofwake:evidence:|urn:renderprove:receipt:)[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$/u;
+
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -46,12 +52,27 @@ function safeProblem(problem) {
   return { code, message: safeProblemMessage(code) };
 }
 
-function safeEvidenceUri(reference) {
-  if (typeof reference.uri === "string" && /^(?:https|urn):/iu.test(reference.uri)) return reference.uri;
-  if (typeof reference.digest === "string" && /^sha256:[a-f0-9]{64}$/u.test(reference.digest)) {
+function digestEvidenceUri(reference) {
+  if (typeof reference.digest === "string" && SAFE_DIGEST.test(reference.digest)) {
     return `urn:proofwake:evidence:${reference.digest}`;
   }
   return "urn:proofwake:evidence:content-excluded";
+}
+
+function safeEvidenceUri(reference) {
+  if (typeof reference.uri === "string") {
+    if (/^https:\/\//u.test(reference.uri)) return reference.uri;
+    if (REVIEWED_EVIDENCE_URN.test(reference.uri)) return reference.uri;
+  }
+  return digestEvidenceUri(reference);
+}
+
+function safeObservationSource(source, adapter) {
+  if (typeof source === "string" && REVIEWED_SOURCE_URI.test(source)) return source;
+  const adapterName = typeof adapter?.name === "string" && SAFE_ADAPTER_NAME.test(adapter.name)
+    ? adapter.name.toLowerCase()
+    : "unreviewed";
+  return `urn:proofwake:adapter:${adapterName}`;
 }
 
 function safeEvidence(reference) {
@@ -113,6 +134,10 @@ function copy(value) {
       result[key] = nested.map(safeEvidence);
       continue;
     }
+    if (key === "source" && typeof nested === "string" && ABSOLUTE_URI.test(nested) && isObject(value.adapter)) {
+      result[key] = safeObservationSource(nested, value.adapter);
+      continue;
+    }
     result[key] = copy(nested);
   }
   return result;
@@ -138,9 +163,10 @@ function alignAttention(report) {
 
 /**
  * Applies the MCP disclosure boundary to an already-built Proofwake projection.
- * Projection selection, status, evidence, trust, coverage, attempts, recovery,
- * and cursors remain unchanged; local and content-derived configuration detail
- * stays outside the MCP response.
+ * Projection selection, status, evidence digests, adapter identity and trust,
+ * coverage, attempts, recovery, and cursors remain unchanged. Local and
+ * unreviewed URI identifiers plus content-derived configuration detail stay
+ * outside the MCP response.
  */
 export function discloseProofwakeProjection(projection) {
   return alignAttention(copy(projection));
