@@ -4,7 +4,7 @@
 
 Proofwake observation v1 is a strict, content-minimised interchange boundary. Numeric and Unicode handling must remain deterministic across direct validation, JSON parsing, stream decoding, and the installed `proofwake emit` command.
 
-The focused boundary matrix lives in `test/observation-boundary-matrix.test.js`.
+The focused boundary matrix lives in `test/observation-boundary-matrix.test.js`. It is intentionally independent of live ingestion code and should continue running against the current integrated `main` so collector changes cannot weaken the shared observation boundary indirectly.
 
 ## Numeric contract
 
