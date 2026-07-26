@@ -275,7 +275,6 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
   const canonicalRoot = await realpath(root);
   const candidate = resolve(canonicalRoot, relativePath);
   if (!inside(canonicalRoot, candidate)) fail(`${codePrefix}_PATH_ESCAPE`, "Selected file escapes the repository root.");
-
   let pathMetadata;
   let canonicalCandidate;
   try {
@@ -288,7 +287,6 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
   if (!pathMetadata.isFile()) fail(`${codePrefix}_NOT_FILE`, "Selected file must be a regular file.");
   if (!inside(canonicalRoot, canonicalCandidate)) fail(`${codePrefix}_PATH_ESCAPE`, "Selected file resolves outside the repository root.");
   if (pathMetadata.size > maximumBytes) fail(`${codePrefix}_TOO_LARGE`, `Selected file exceeds ${maximumBytes} bytes.`);
-
   let handle;
   try {
     handle = await open(canonicalCandidate, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -381,6 +379,7 @@ function summaryFacts(receipt) {
 
 function buildObservation({ repository, revision, receipt, receiptFile, artifacts, ingestedAt }) {
   const receiptIdentity = digestToken(`${receipt.project}\u0000${receipt.startedAt}\u0000${receipt.finishedAt}`);
+  const mappedStatus = receipt.summary.cases === 0 ? "unavailable" : receipt.status;
   const facts = [
     { name: "renderprove.project.identity", value: digestToken(receipt.project) },
     { name: "renderprove.manifest.identity", value: receipt.manifest === null ? "none" : digestToken(receipt.manifest) },
@@ -396,7 +395,6 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
     facts.push({ name: `renderprove.case.${identity}.status`, value: item.status });
     facts.push({ name: `renderprove.case.${identity}.navigation-ok`, value: item.navigationOk });
   }
-
   const evidence = [{
     uri: evidenceUri("receipt", receiptFile.digest),
     digest: `sha256:${receiptFile.digest}`,
@@ -422,7 +420,6 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
       disclosure: "restricted-reference",
     });
   }
-
   return {
     specversion: "1.0",
     id: `renderprove.${receiptIdentity}`,
@@ -442,7 +439,7 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
         sourceSchemaVersion: "1",
       },
       kind: "browser-review",
-      status: receipt.status,
+      status: mappedStatus,
       timeSource: "producer",
       observedAt: receipt.finishedAt,
       ingestedAt,
@@ -450,7 +447,7 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
       relationships: { repository, revision, run: `renderprove-${receiptIdentity.slice(0, 32)}` },
       facts,
       evidence,
-      coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
+      coverage: { state: mappedStatus === "unavailable" ? "unavailable" : "complete", redacted: false, truncated: false, omitted: [] },
     },
   };
 }
@@ -465,27 +462,16 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
     globalPolicy: entry.configuration.source === "global" ? entry.policy : undefined,
     lifecycle: entry.policy.lifecycle.state,
   });
-  if (inspection.policy.repository.kind !== "remote") {
-    fail("RENDERPROVE_REPOSITORY_UNSUPPORTED", "Renderprove adapter v1 requires a remote owner/name repository identity.");
-  }
+  if (inspection.policy.repository.kind !== "remote") fail("RENDERPROVE_REPOSITORY_UNSUPPORTED", "Renderprove adapter v1 requires a remote owner/name repository identity.");
   const repository = inspection.policy.repository.id;
   const adapter = inspection.policy.adapters.find((candidate) => candidate.name === adapterName);
-  if (!adapter || adapter.type !== "receipt-file" || adapter.schema !== "renderprove.receipt.v1") {
-    fail("RENDERPROVE_ADAPTER_UNDECLARED", "Repository policy does not declare the selected Renderprove receipt adapter.");
-  }
+  if (!adapter || adapter.type !== "receipt-file" || adapter.schema !== "renderprove.receipt.v1") fail("RENDERPROVE_ADAPTER_UNDECLARED", "Repository policy does not declare the selected Renderprove receipt adapter.");
   const readiness = inspection.adapterReadiness[adapterName];
-  if (!readiness || readiness.state !== "ready") {
-    fail(readiness?.code ?? "RENDERPROVE_RECEIPT_UNAVAILABLE", "Declared Renderprove receipt is not ready for ingestion.");
-  }
-  const signal = inspection.policy.signals.find((candidate) =>
-    candidate.kind === "browser-review" && candidate.acceptedSources.includes(`adapter:${adapterName}`));
+  if (!readiness || readiness.state !== "ready") fail(readiness?.code ?? "RENDERPROVE_RECEIPT_UNAVAILABLE", "Declared Renderprove receipt is not ready for ingestion.");
+  const signal = inspection.policy.signals.find((candidate) => candidate.kind === "browser-review" && candidate.acceptedSources.includes(`adapter:${adapterName}`));
   if (!signal) fail("RENDERPROVE_SIGNAL_UNDECLARED", "Repository policy does not accept this adapter for browser-review evidence.");
-
   const before = await inspectCheckout(entry.root);
-  if (revision !== undefined && revision !== before.revision) {
-    fail("RENDERPROVE_REVISION_CONFLICT", "Explicit revision must match the clean current checkout.", "$.revision");
-  }
-
+  if (revision !== undefined && revision !== before.revision) fail("RENDERPROVE_REVISION_CONFLICT", "Explicit revision must match the clean current checkout.", "$.revision");
   const receiptFile = await readBoundedFile(entry.root, adapter.path, RENDERPROVE_RECEIPT_MAX_BYTES, "RENDERPROVE_RECEIPT");
   const raw = parseStrictJson(decodeUtf8(receiptFile.bytes), {
     maxBytes: RENDERPROVE_RECEIPT_MAX_BYTES,
@@ -497,10 +483,7 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
   });
   const receipt = validateRenderproveReceipt(raw);
   const ingestedAt = now.toISOString();
-  if (Date.parse(ingestedAt) < Date.parse(receipt.finishedAt)) {
-    fail("RENDERPROVE_CLOCK_SKEW", "Receipt completion time is later than the ingestion clock.", "$.finishedAt");
-  }
-
+  if (Date.parse(ingestedAt) < Date.parse(receipt.finishedAt)) fail("RENDERPROVE_CLOCK_SKEW", "Receipt completion time is later than the ingestion clock.", "$.finishedAt");
   const artifactPaths = [];
   const artifactsByPath = new Map();
   let artifactBytes = 0;
@@ -516,22 +499,14 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
       if (artifact.digest !== reference.sha256) fail("RENDERPROVE_ARTIFACT_DIGEST_MISMATCH", "Screenshot digest does not match the receipt.");
       if (!hasPngSignature(artifact.bytes)) fail("RENDERPROVE_ARTIFACT_MEDIA_MISMATCH", "Screenshot bytes do not match image/png.");
       artifactBytes += artifact.sizeBytes;
-      if (artifactBytes > RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES) {
-        fail("RENDERPROVE_ARTIFACT_TOTAL_TOO_LARGE", `Verified artifacts exceed ${RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES} bytes.`);
-      }
+      if (artifactBytes > RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES) fail("RENDERPROVE_ARTIFACT_TOTAL_TOO_LARGE", `Verified artifacts exceed ${RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES} bytes.`);
       artifactsByPath.set(reference.path, artifact);
     }
   }
-
   const allowedUntracked = new Set([adapter.path, ...artifactPaths].map((value) => value.replaceAll("\\", "/")));
-  if (before.untracked.some((value) => !allowedUntracked.has(value))) {
-    fail("RENDERPROVE_CHECKOUT_DIRTY", "Untracked project files prevent revision binding.");
-  }
+  if (before.untracked.some((value) => !allowedUntracked.has(value))) fail("RENDERPROVE_CHECKOUT_DIRTY", "Untracked project files prevent revision binding.");
   const after = await inspectCheckout(entry.root);
-  if (after.revision !== before.revision || after.untracked.some((value) => !allowedUntracked.has(value))) {
-    fail("RENDERPROVE_CHECKOUT_CHANGED", "Checkout changed while the receipt was being verified.");
-  }
-
+  if (after.revision !== before.revision || after.untracked.some((value) => !allowedUntracked.has(value))) fail("RENDERPROVE_CHECKOUT_CHANGED", "Checkout changed while the receipt was being verified.");
   const artifacts = [...artifactsByPath.values()];
   const observation = buildObservation({ repository, revision: before.revision, receipt, receiptFile, artifacts, ingestedAt });
   const result = await new ObservationLedger(eventStore).append(observation);
@@ -542,6 +517,7 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
     artifactCount: artifacts.length,
     repository,
     revision: before.revision,
-    browserStatus: receipt.status,
+    browserStatus: observation.data.status,
+    producerStatus: receipt.status,
   };
 }
