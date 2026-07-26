@@ -99,8 +99,18 @@ function uniqueWarnings(warnings) {
   return [...new Set(warnings)];
 }
 
+const CONTENT_DERIVED_OBSERVATION_ERRORS = new Set([
+  "OBSERVATION_DUPLICATE_KEY",
+  "OBSERVATION_DUPLICATE_VALUE",
+  "OBSERVATION_INVALID_VALUE",
+  "OBSERVATION_UNKNOWN_FIELD",
+]);
+
 function errorDetails(error) {
   const code = typeof error?.code === "string" ? error.code : "PROOFWAKE_EMIT_FAILED";
+  if (CONTENT_DERIVED_OBSERVATION_ERRORS.has(code)) {
+    return { code, message: "Observation verification failed." };
+  }
   const message = error instanceof Error ? error.message : String(error);
   const details = { code, message };
   if (typeof error?.path === "string") details.path = error.path;
