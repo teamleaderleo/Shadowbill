@@ -1,12 +1,16 @@
 import { createServer } from "node:http";
+import { dirname, join } from "node:path";
 import { URL } from "node:url";
 import { verifyBearerAuthorization } from "./auth.js";
 import { dashboardResponse, isDashboardPath } from "./dashboard.js";
 import { buildDailyReport, dateInTimeZone } from "./estimate.js";
+import { buildFleetProjection } from "./fleet-projection.js";
 import { normalizeGitHubWebhook, verifyGitHubSignature } from "./github.js";
 import { browserCorsHeaders, isAllowedHost, normalizeAllowedHosts } from "./http-security.js";
+import { buildRevisionProjection } from "./inspect-projection.js";
 import { buildRangeReport, calendarDateRange } from "./range.js";
 import { buildRepositoryAllocationReport } from "./repositories.js";
+import { RepositoryRegistryStore } from "./repository-registry.js";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -21,10 +25,13 @@ const CONVERSATION_HASH = /^[a-f0-9]{24}$/i;
 const LOGICAL_TURN_HASH = /^[a-f0-9]{24}$/i;
 const MODEL_SLUG = /^[a-z0-9][a-z0-9._:-]{0,99}$/i;
 const COLLECTOR_VERSION = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
+const PROJECTION_REPOSITORY = /^[a-z0-9](?:[a-z0-9._-]{0,99})\/[a-z0-9](?:[a-z0-9._-]{0,99})$/u;
+const PROJECTION_REVISION = /^[a-f0-9]{40}$/u;
 
 function sendJson(response, status, value, headers = {}) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
     ...headers,
   });
   response.end(status === 204 ? undefined : JSON.stringify(value));
@@ -132,8 +139,36 @@ function authorizeCollector(request, response, token, headers) {
   return true;
 }
 
+function projectionError(error, command) {
+  const code = typeof error?.code === "string" ? error.code : "PROJECTION_HTTP_FAILED";
+  const status = code === "PROJECTION_REPOSITORY_UNKNOWN"
+    ? 404
+    : code === "PROJECTION_REPOSITORY_REQUIRED" || code === "PROJECTION_INVALID_REVISION"
+      ? 400
+      : 500;
+  return {
+    status,
+    value: {
+      service: "proofwake",
+      command,
+      status: "error",
+      error: {
+        code,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    },
+  };
+}
+
+function resolveRegistryStore(options) {
+  if (options.registryStore !== undefined) return options.registryStore;
+  if (typeof options.store?.path !== "string") return null;
+  return new RepositoryRegistryStore(join(dirname(options.store.path), "repositories.json"));
+}
+
 export function createCollectorServer(options) {
   const allowedHosts = normalizeAllowedHosts(options.allowedHosts);
+  const registryStore = resolveRegistryStore(options);
 
   return createServer(async (request, response) => {
     let routeHeaders = {};
@@ -162,7 +197,77 @@ export function createCollectorServer(options) {
       }
 
       if (request.method === "GET" && url.pathname === "/health") {
-        sendJson(response, 200, { ok: true, service: "shadowbill", version: "0.3.0" });
+        sendJson(response, 200, { ok: true, service: "proofwake", version: "0.3.0" });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/fleet") {
+        if (!registryStore) {
+          sendJson(response, 503, {
+            service: "proofwake",
+            command: "fleet",
+            status: "error",
+            error: { code: "PROJECTION_REGISTRY_UNAVAILABLE", message: "Repository registry is unavailable." },
+          });
+          return;
+        }
+        try {
+          const report = await buildFleetProjection({
+            registryStore,
+            eventStore: options.store,
+            now: new Date(),
+          });
+          sendJson(response, 200, report);
+        } catch (error) {
+          const failure = projectionError(error, "fleet");
+          sendJson(response, failure.status, failure.value);
+        }
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/revision-evidence") {
+        if (!registryStore) {
+          sendJson(response, 503, {
+            service: "proofwake",
+            command: "inspect",
+            status: "error",
+            error: { code: "PROJECTION_REGISTRY_UNAVAILABLE", message: "Repository registry is unavailable." },
+          });
+          return;
+        }
+        const repository = url.searchParams.get("repository")?.toLowerCase() ?? "";
+        const revision = url.searchParams.get("revision") ?? undefined;
+        if (!PROJECTION_REPOSITORY.test(repository)) {
+          sendJson(response, 400, {
+            service: "proofwake",
+            command: "inspect",
+            status: "error",
+            error: { code: "PROJECTION_REPOSITORY_REQUIRED", message: "repository must use canonical owner/name form." },
+          });
+          return;
+        }
+        if (revision !== undefined && !PROJECTION_REVISION.test(revision)) {
+          sendJson(response, 400, {
+            service: "proofwake",
+            command: "inspect",
+            status: "error",
+            error: { code: "PROJECTION_INVALID_REVISION", message: "revision must be a full lowercase SHA-1." },
+          });
+          return;
+        }
+        try {
+          const report = await buildRevisionProjection({
+            repository,
+            revision,
+            registryStore,
+            eventStore: options.store,
+            now: new Date(),
+          });
+          sendJson(response, 200, report);
+        } catch (error) {
+          const failure = projectionError(error, "inspect");
+          sendJson(response, failure.status, failure.value);
+        }
         return;
       }
 
