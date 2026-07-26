@@ -13,8 +13,9 @@ const execFileAsync = promisify(execFile);
 
 export const RENDERPROVE_RECEIPT_SCHEMA = "https://raw.githubusercontent.com/teamleaderleo/renderprove/main/schema/receipt-v1.schema.json";
 export const RENDERPROVE_RECEIPT_MAX_BYTES = 4 * 1024 * 1024;
-export const RENDERPROVE_ARTIFACT_MAX_BYTES = 256 * 1024 * 1024;
-export const RENDERPROVE_MAX_CASES = 28;
+export const RENDERPROVE_ARTIFACT_MAX_BYTES = 128 * 1024 * 1024;
+export const RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES = 512 * 1024 * 1024;
+export const RENDERPROVE_MAX_CASES = 25;
 export const RENDERPROVE_MAX_ARTIFACTS = 15;
 
 const RECEIPT_KEYS = new Set([
@@ -25,8 +26,10 @@ const CASE_KEYS = new Set([
   "id", "status", "startedAt", "finishedAt", "route", "viewport", "navigation",
   "page", "artifacts", "diagnostics",
 ]);
+const DIAGNOSTIC_KINDS = ["console", "page", "request", "http"];
 const SHA256 = /^[a-f0-9]{64}$/u;
 const REVISION = /^[a-f0-9]{40}$/u;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class RenderproveAdapterError extends Error {
   constructor(code, message, path = "$") {
@@ -130,13 +133,14 @@ function validateRuntime(runtime) {
 }
 
 function validatePage(page, path) {
-  if (page === null) return;
+  if (page === null) return { unavailable: true, horizontalOverflow: false };
   exactKeys(page, new Set([
     "title", "lang", "bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight",
   ]), ["title", "lang", "bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"], path);
   text(page.title, `${path}.title`, { min: 0, max: 8192 });
   if (page.lang !== null) text(page.lang, `${path}.lang`, { max: 128 });
   for (const key of ["bodyTextLength", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"]) count(page[key], `${path}.${key}`);
+  return { unavailable: false, horizontalOverflow: page.scrollWidth > page.clientWidth };
 }
 
 function validateDiagnostic(value, path) {
@@ -146,8 +150,9 @@ function validateDiagnostic(value, path) {
   }
   if (Object.keys(value).length > 16) fail("RENDERPROVE_INVALID_VALUE", "Diagnostic contains too many fields.", path);
   instant(value.at, `${path}.at`);
-  oneOf(value.kind, new Set(["console", "page", "request", "http"]), `${path}.kind`);
+  const kind = oneOf(value.kind, new Set(DIAGNOSTIC_KINDS), `${path}.kind`);
   text(value.message, `${path}.message`, { min: 0, max: 32_768 });
+  return kind;
 }
 
 function validateCase(value, index) {
@@ -178,7 +183,7 @@ function validateCase(value, index) {
   exactKeys(value.navigation, new Set(["status", "ok"]), ["status", "ok"], `${path}.navigation`);
   if (value.navigation.status !== null) count(value.navigation.status, `${path}.navigation.status`, 999);
   if (typeof value.navigation.ok !== "boolean") fail("RENDERPROVE_INVALID_TYPE", "Navigation ok must be boolean.", `${path}.navigation.ok`);
-  validatePage(value.page, `${path}.page`);
+  const page = validatePage(value.page, `${path}.page`);
 
   if (!Array.isArray(value.artifacts) || value.artifacts.length > RENDERPROVE_MAX_ARTIFACTS) {
     fail("RENDERPROVE_ARTIFACT_LIMIT", `A case may reference at most ${RENDERPROVE_MAX_ARTIFACTS} artifacts.`, `${path}.artifacts`);
@@ -198,8 +203,20 @@ function validateCase(value, index) {
   if (!Array.isArray(value.diagnostics) || value.diagnostics.length > 1024) {
     fail("RENDERPROVE_DIAGNOSTIC_LIMIT", "A case may contain at most 1024 diagnostics.", `${path}.diagnostics`);
   }
-  value.diagnostics.forEach((diagnostic, diagnosticIndex) => validateDiagnostic(diagnostic, `${path}.diagnostics[${diagnosticIndex}]`));
-  return { id, status, navigationOk: value.navigation.ok, artifacts, diagnosticCount: value.diagnostics.length };
+  const diagnosticKinds = Object.fromEntries(DIAGNOSTIC_KINDS.map((kind) => [kind, 0]));
+  value.diagnostics.forEach((diagnostic, diagnosticIndex) => {
+    diagnosticKinds[validateDiagnostic(diagnostic, `${path}.diagnostics[${diagnosticIndex}]`)] += 1;
+  });
+  return {
+    id,
+    status,
+    navigationOk: value.navigation.ok,
+    pageUnavailable: page.unavailable,
+    horizontalOverflow: page.horizontalOverflow,
+    artifacts,
+    diagnosticCount: value.diagnostics.length,
+    diagnosticKinds,
+  };
 }
 
 export function validateRenderproveReceipt(value) {
@@ -295,12 +312,7 @@ async function readBoundedFile(root, relativePath, maximumBytes, codePrefix) {
       fail(`${codePrefix}_CHANGED`, "Selected file changed while it was being read.");
     }
     if (bytes.length > maximumBytes) fail(`${codePrefix}_TOO_LARGE`, `Selected file exceeds ${maximumBytes} bytes.`);
-    return {
-      bytes,
-      sizeBytes: bytes.length,
-      digest: createHash("sha256").update(bytes).digest("hex"),
-      relativePath,
-    };
+    return { bytes, sizeBytes: bytes.length, digest: createHash("sha256").update(bytes).digest("hex"), relativePath };
   } finally {
     await handle.close();
   }
@@ -348,6 +360,25 @@ function evidenceUri(kind, digest) {
   return `urn:renderprove:${kind}:sha256:${digest}`;
 }
 
+function summaryFacts(receipt) {
+  const diagnosticTotals = Object.fromEntries(DIAGNOSTIC_KINDS.map((kind) => [kind, 0]));
+  let navigationFailed = 0;
+  let pageUnavailable = 0;
+  let horizontalOverflow = 0;
+  for (const item of receipt.cases) {
+    if (!item.navigationOk) navigationFailed += 1;
+    if (item.pageUnavailable) pageUnavailable += 1;
+    if (item.horizontalOverflow) horizontalOverflow += 1;
+    for (const kind of DIAGNOSTIC_KINDS) diagnosticTotals[kind] += item.diagnosticKinds[kind];
+  }
+  return [
+    { name: "renderprove.summary.navigation-failed", value: navigationFailed },
+    { name: "renderprove.summary.page-unavailable", value: pageUnavailable },
+    { name: "renderprove.summary.horizontal-overflow", value: horizontalOverflow },
+    ...DIAGNOSTIC_KINDS.map((kind) => ({ name: `renderprove.diagnostics.${kind}`, value: diagnosticTotals[kind] })),
+  ];
+}
+
 function buildObservation({ repository, revision, receipt, receiptFile, artifacts, ingestedAt }) {
   const receiptIdentity = digestToken(`${receipt.project}\u0000${receipt.startedAt}\u0000${receipt.finishedAt}`);
   const facts = [
@@ -358,6 +389,7 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
     { name: "renderprove.summary.passed", value: receipt.summary.passed },
     { name: "renderprove.summary.failed", value: receipt.summary.failed },
     { name: "renderprove.summary.diagnostics", value: receipt.summary.diagnostics },
+    ...summaryFacts(receipt),
   ];
   for (const item of receipt.cases) {
     const identity = digestToken(item.id);
@@ -415,21 +447,16 @@ function buildObservation({ repository, revision, receipt, receiptFile, artifact
       observedAt: receipt.finishedAt,
       ingestedAt,
       durationMs: receipt.durationMs,
-      relationships: {
-        repository,
-        revision,
-        run: `renderprove-${receiptIdentity.slice(0, 32)}`,
-      },
+      relationships: { repository, revision, run: `renderprove-${receiptIdentity.slice(0, 32)}` },
       facts,
       evidence,
-      coverage: {
-        state: "complete",
-        redacted: false,
-        truncated: false,
-        omitted: [],
-      },
+      coverage: { state: "complete", redacted: false, truncated: false, omitted: [] },
     },
   };
+}
+
+function hasPngSignature(bytes) {
+  return bytes.length >= PNG_SIGNATURE.length && bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
 }
 
 export async function ingestRenderproveReceipt({ entry, eventStore, adapterName = "renderprove", revision, now = new Date() }) {
@@ -475,13 +502,24 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
   }
 
   const artifactPaths = [];
-  const artifacts = [];
+  const artifactsByPath = new Map();
+  let artifactBytes = 0;
   for (const item of receipt.cases) {
     for (const reference of item.artifacts) {
       artifactPaths.push(reference.path);
+      const existing = artifactsByPath.get(reference.path);
+      if (existing) {
+        if (existing.digest !== reference.sha256) fail("RENDERPROVE_ARTIFACT_REFERENCE_CONFLICT", "One artifact path has conflicting receipt digests.");
+        continue;
+      }
       const artifact = await readBoundedFile(entry.root, reference.path, RENDERPROVE_ARTIFACT_MAX_BYTES, "RENDERPROVE_ARTIFACT");
       if (artifact.digest !== reference.sha256) fail("RENDERPROVE_ARTIFACT_DIGEST_MISMATCH", "Screenshot digest does not match the receipt.");
-      artifacts.push(artifact);
+      if (!hasPngSignature(artifact.bytes)) fail("RENDERPROVE_ARTIFACT_MEDIA_MISMATCH", "Screenshot bytes do not match image/png.");
+      artifactBytes += artifact.sizeBytes;
+      if (artifactBytes > RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES) {
+        fail("RENDERPROVE_ARTIFACT_TOTAL_TOO_LARGE", `Verified artifacts exceed ${RENDERPROVE_ARTIFACT_TOTAL_MAX_BYTES} bytes.`);
+      }
+      artifactsByPath.set(reference.path, artifact);
     }
   }
 
@@ -494,14 +532,8 @@ export async function ingestRenderproveReceipt({ entry, eventStore, adapterName 
     fail("RENDERPROVE_CHECKOUT_CHANGED", "Checkout changed while the receipt was being verified.");
   }
 
-  const observation = buildObservation({
-    repository,
-    revision: before.revision,
-    receipt,
-    receiptFile,
-    artifacts,
-    ingestedAt,
-  });
+  const artifacts = [...artifactsByPath.values()];
+  const observation = buildObservation({ repository, revision: before.revision, receipt, receiptFile, artifacts, ingestedAt });
   const result = await new ObservationLedger(eventStore).append(observation);
   return {
     ...result,
