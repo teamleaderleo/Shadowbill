@@ -68,3 +68,16 @@ test("adapter schema identifiers accept stable tokens, HTTPS URLs, and URNs", as
     assert.equal(normalized.adapters[0].schema, schema);
   }
 });
+
+test("published schema mirrors the runtime URI allowlist", async () => {
+  const published = JSON.parse(await readFile(new URL("../schema/repository-policy-v1.schema.json", import.meta.url), "utf8"));
+  const schemaRule = published.$defs.adapter.properties.schema;
+  assert.equal(schemaRule.oneOf[0].$ref, "#/$defs/slug");
+
+  const uriPattern = new RegExp(schemaRule.oneOf[1].pattern, "u");
+  assert.match("https://schemas.example.com/receipt-v1.json", uriPattern);
+  assert.match("urn:renderprove:schema:receipt:v1", uriPattern);
+  assert.doesNotMatch("file:///home/operator/private/schema.json", uriPattern);
+  assert.doesNotMatch("http://example.com/schema.json", uriPattern);
+  assert.doesNotMatch("https://operator:secret@example.com/schema.json", uriPattern);
+});
