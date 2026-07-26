@@ -26,28 +26,36 @@ Takes an empty argument object and returns the current fleet projection, includi
 
 Required argument:
 
-- `repository`: canonical lowercase `owner/name` identity
+- `repository`: an enrolled canonical `owner/name` identity or local display label
 
-Returns the same selected-revision state as:
+The selector is a lowercase string from 1 through 200 characters using letters, digits, `.`, `_`, `-`, and `/`. The shared projection resolver decides whether it matches a registry identity or label.
+
+Returns the same selected-revision state as either:
 
 ```bash
 proofwake inspect --repo owner/name --output json
+proofwake inspect --repo local-display-label --output json
 ```
 
 ### `proofwake_revision_evidence`
 
 Required arguments:
 
-- `repository`: canonical lowercase `owner/name` identity
+- `repository`: an enrolled canonical `owner/name` identity or local display label
 - `revision`: full lowercase 40-character SHA-1
 
-Returns the same explicit-revision state as:
+The repository selector uses the same bounded identity-or-label contract as `proofwake_repository_status`.
+
+Returns the same explicit-revision state as either:
 
 ```bash
 proofwake inspect FULL_SHA --repo owner/name --output json
+proofwake inspect FULL_SHA --repo local-display-label --output json
 ```
 
-Unknown fields and malformed identities or revisions produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, trust, coverage, attempts, reruns, recovery, and attention state remain unchanged. The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, prompts, responses, tokens, secrets, and environment values. HTTPS and URN evidence references remain intact; references using local or other URI schemes become digest-backed Proofwake URNs.
+Unknown fields and malformed selectors or revisions produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, adapter identity and trust, coverage, attempts, reruns, recovery, and attention state remain unchanged.
+
+The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, prompts, responses, tokens, secrets, and environment values. HTTPS evidence references, Proofwake evidence URNs, and the reviewed Renderprove receipt namespace remain intact. File URIs, arbitrary URNs, and other unreviewed evidence references become digest-backed `urn:proofwake:evidence:sha256:...` identifiers. Reviewed `urn:proofwake:adapter:...` observation sources remain intact; other absolute source identifiers are replaced with the stable Proofwake adapter identifier derived from the separately retained adapter name.
 
 ## Shadowbill compatibility tools
 
