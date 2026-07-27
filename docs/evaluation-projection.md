@@ -28,13 +28,14 @@ The command reads one immutable JSONL ledger snapshot and performs no recovery, 
 
 A receipt contributes evidence only when:
 
-- it is stored as a `proofwake_observation` record;
+- it is stored as an exact canonical `proofwake_observation` wrapper with no extra fields;
 - the wrapper ID, observation identity, timestamp, and fingerprint match the canonical observation-ledger representation;
+- its observation identity is unique within the selected ledger snapshot;
 - the observation targets the selected repository and task class;
 - the optional target-run filter matches;
 - the merged evaluation-observation validator accepts the complete receipt.
 
-Invalid evaluation-looking records are excluded. Output reports only fixed exclusion codes and counts; it does not return rejected fact names, values, receipt bytes, or validator prose.
+Invalid or duplicate evaluation-looking records are excluded. Output reports only fixed exclusion codes and counts; it does not return rejected fact names, values, receipt bytes, wrapper extensions, or validator prose.
 
 ## Projection shape
 
@@ -56,22 +57,22 @@ Rubric versions are never averaged together. Missing evidence is reported throug
 
 ## Evidence sufficiency
 
-A rubric group becomes `evidence_available` when it contains at least two comparable work-evaluation receipts. Otherwise it remains `insufficient_evidence`.
+A rubric group becomes `evidence_available` only when it contains work-evaluation evidence for at least two distinct target runs. Multiple receipts, facets, corrections, or evaluators for one target run remain visible but cannot satisfy the sample gate by themselves.
 
 The top-level status is `evidence_available` when at least one rubric group meets that minimum. Other sparse or differently versioned groups remain visible with their own status and limitations.
 
-This is only a minimum sample gate. It does not prove representativeness, model quality, reviewer quality, or readiness for broader work.
+This is only a minimum sample gate. It does not prove representativeness, model quality, reviewer quality, independence across producers, or readiness for broader work.
 
 ## Limitations
 
 The projection can state:
 
-- small comparable sample;
+- no rubric group covers two distinct target runs;
 - evidence concentrated in one evaluator run;
 - mixed rubric versions;
 - unresolved or repair-required findings;
 - missing evidence and partial coverage;
-- invalid receipts excluded;
+- invalid or duplicate receipts excluded;
 - unknown task-selection bias.
 
 These limitations are evidence, not authority decisions.
@@ -84,7 +85,7 @@ Output excludes:
 - patches and raw review prose;
 - logs, commands, and environment values;
 - credentials;
-- raw receipt bytes;
+- raw receipt bytes and wrapper extensions;
 - ledger and filesystem paths;
 - operating-system error text.
 
