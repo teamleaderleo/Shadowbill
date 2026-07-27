@@ -97,32 +97,80 @@ function errorDetails(error) {
   };
 }
 
+function printCounts(label, entries, indent = "  ") {
+  for (const entry of entries) console.log(`${indent}${label} ${String(entry.value)}: ${entry.count}`);
+}
+
+function printCoverage(label, coverage) {
+  console.log(`${label}:`);
+  printCounts("state", coverage.states, "  ");
+  console.log(`  redacted receipts: ${coverage.redactedReceipts}`);
+  console.log(`  truncated receipts: ${coverage.truncatedReceipts}`);
+  printCounts("omission", coverage.omissions, "  ");
+}
+
 function printHuman(report) {
   console.log(`Proofwake evaluation — ${report.selection.repository} — ${report.selection.taskClass}`);
   console.log(`Status: ${report.status}`);
   if (report.selection.targetRun) console.log(`Target run: ${report.selection.targetRun}`);
   console.log(`Receipts: ${report.receipts.selected} selected; ${report.receipts.excluded} excluded`);
-  console.log(`Work evaluations: ${report.receipts.workEvaluations}; review findings: ${report.receipts.reviewFindings}`);
+  console.log(`Work: ${report.receipts.workEvaluations} receipts; ${report.receipts.currentWorkMarks} current marks`);
+  console.log(`Review: ${report.receipts.reviewFindings} receipts; ${report.receipts.currentReviewFindings} current findings`);
+  printCounts("excluded", report.receipts.excludedByCode, "");
   console.log(`Cursor: ${report.sourceCursor}`);
+
+  for (const target of report.targets) {
+    console.log("");
+    console.log(`Target ${target.targetRun}`);
+    console.log(`  work receipts ${target.workEvaluationReceipts}; current marks ${target.currentWorkMarks}`);
+    console.log(`  review receipts ${target.reviewFindingReceipts}; current findings ${target.currentReviewFindings}`);
+    if (target.callsigns.length > 0) console.log(`  callsigns ${target.callsigns.join(", ")}`);
+    if (target.modelProfiles.length > 0) console.log(`  model profiles ${target.modelProfiles.join(", ")}`);
+    if (target.adapterProfiles.length > 0) console.log(`  adapter profiles ${target.adapterProfiles.join(", ")}`);
+  }
 
   for (const group of report.rubricGroups) {
     console.log("");
     console.log(`Rubric ${group.rubricVersion} — ${group.status}`);
-    console.log(`  comparable work evaluations ${group.comparableWorkEvaluations}`);
+    console.log(`  work receipts ${group.workEvaluationReceipts}; current marks ${group.currentWorkMarks}`);
+    console.log(`  comparable marks ${group.comparableWorkEvaluations}; distinct target runs ${group.comparableTargetRuns}`);
     console.log(`  target runs ${group.targetRunCount}; evaluator runs ${group.evaluatorRunCount}`);
     console.log(`  repairs ${group.repairCountTotal}`);
-    for (const classification of group.classifications) {
-      console.log(`  classification ${classification.value}: ${classification.count}`);
+    printCounts("classification", group.classifications);
+    printCounts("severity", group.severities);
+    printCounts("accepted first pass", group.acceptedFirstPass);
+    printCounts("confidence", group.confidence);
+    printCounts("uncertainty", group.uncertainty);
+    printCounts("evidence class", group.evidenceClasses);
+    printCounts("independence", group.independence);
+    for (const facet of group.facets) {
+      console.log(`  facet ${facet.facet}: ${facet.count}`);
+      printCounts("classification", facet.classifications, "    ");
+      printCounts("severity", facet.severities, "    ");
     }
+    for (const mark of group.marks) {
+      console.log(`  mark ${mark.targetRun} / ${mark.evaluatorRun} / ${mark.facet}`);
+      console.log(`    ${mark.classification}; severity ${mark.severity}; confidence ${mark.confidence}; uncertainty ${mark.uncertainty}`);
+      console.log(`    accepted first pass ${mark.acceptedFirstPass}; repairs ${mark.repairCount}; receipt ${mark.receipt.id}`);
+    }
+    printCoverage("  current coverage", group.coverage);
   }
 
   for (const reviewer of report.reviewerCalibration) {
     console.log("");
     console.log(`Evaluator ${reviewer.evaluatorRun} / ${reviewer.rubricVersion}`);
-    console.log(`  findings ${reviewer.findingCount}`);
-    for (const disposition of reviewer.dispositions) {
-      console.log(`  disposition ${disposition.value}: ${disposition.count}`);
+    console.log(`  finding receipts ${reviewer.findingReceiptCount}; current findings ${reviewer.findingCount}`);
+    if (reviewer.callsigns.length > 0) console.log(`  callsigns ${reviewer.callsigns.join(", ")}`);
+    printCounts("disposition", reviewer.dispositions);
+    printCounts("severity", reviewer.severities);
+    printCounts("confidence", reviewer.confidence);
+    printCounts("uncertainty", reviewer.uncertainty);
+    for (const finding of reviewer.findings) {
+      console.log(`  finding ${finding.targetRun} / ${finding.findingId}`);
+      console.log(`    ${finding.disposition}; severity ${finding.severity}; confidence ${finding.confidence}; uncertainty ${finding.uncertainty}`);
+      console.log(`    clearing ${finding.clearingCondition}; receipt ${finding.receipt.id}`);
     }
+    printCoverage("  current coverage", reviewer.coverage);
   }
 
   if (report.openFindings.length > 0) {
@@ -133,13 +181,9 @@ function printHuman(report) {
     }
   }
 
-  if (report.coverage.omissions.length > 0) {
-    console.log("");
-    console.log("Coverage omissions:");
-    for (const omission of report.coverage.omissions) {
-      console.log(`  ${omission.value}: ${omission.count}`);
-    }
-  }
+  console.log("");
+  printCoverage("Selected-receipt coverage", report.coverage.selectedReceipts);
+  printCoverage("Current-evidence coverage", report.coverage.currentEvidence);
 
   if (report.limitations.length > 0) {
     console.log("");
