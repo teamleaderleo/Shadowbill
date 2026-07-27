@@ -36,9 +36,17 @@ function digest(value) {
   return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
+function canonicalValue(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalValue(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function eventDigest(event) {
   try {
-    return digest(JSON.stringify(event));
+    return digest(canonicalValue(event));
   } catch {
     return digest("unserializable-evaluation-event");
   }
@@ -171,6 +179,26 @@ function compareRecords(left, right) {
     || left.receipt.id.localeCompare(right.receipt.id);
 }
 
+function latestRecords(records, keyOf) {
+  const latest = new Map();
+  for (const record of [...records].sort(compareRecords)) latest.set(keyOf(record), record);
+  return [...latest.values()].sort(compareRecords);
+}
+
+function currentWorkRecords(records) {
+  return latestRecords(
+    records,
+    (record) => `${record.rubricVersion}\u0000${record.targetRun}\u0000${record.evaluatorRun}\u0000${record.facet}`,
+  );
+}
+
+function currentReviewRecords(records) {
+  return latestRecords(
+    records,
+    (record) => `${record.rubricVersion}\u0000${record.targetRun}\u0000${record.evaluatorRun}\u0000${record.findingId}`,
+  );
+}
+
 function selectCandidate(event, selection) {
   const observation = event?.observation;
   if (event?.type !== "proofwake_observation" || !SUPPORTED_TYPES.has(observation?.type)) {
@@ -231,7 +259,9 @@ function coverageSummary(records) {
   };
 }
 
-function targetViews(records) {
+function targetViews(records, currentWork, currentReview) {
+  const currentWorkKeys = new Set(currentWork.map((record) => `${record.receipt.source}\u0000${record.receipt.id}`));
+  const currentReviewKeys = new Set(currentReview.map((record) => `${record.receipt.source}\u0000${record.receipt.id}`));
   return [...groupBy(records, (record) => record.targetRun).entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([targetRun, group]) => ({
@@ -239,8 +269,10 @@ function targetViews(records) {
       callsigns: [...new Set(group.map((record) => record.targetCallsign).filter(Boolean))].sort(),
       modelProfiles: [...new Set(group.map((record) => record.modelProfile).filter(Boolean))].sort(),
       adapterProfiles: [...new Set(group.map((record) => record.adapterProfile).filter(Boolean))].sort(),
-      workEvaluationCount: group.filter((record) => record.family === "work-evaluation").length,
-      reviewFindingCount: group.filter((record) => record.family === "review-finding").length,
+      workEvaluationReceipts: group.filter((record) => record.family === "work-evaluation").length,
+      reviewFindingReceipts: group.filter((record) => record.family === "review-finding").length,
+      currentWorkMarks: group.filter((record) => currentWorkKeys.has(`${record.receipt.source}\u0000${record.receipt.id}`)).length,
+      currentReviewFindings: group.filter((record) => currentReviewKeys.has(`${record.receipt.source}\u0000${record.receipt.id}`)).length,
     }));
 }
 
@@ -265,40 +297,46 @@ function markSummary(mark) {
   };
 }
 
-function rubricGroups(workRecords) {
-  return [...groupBy(workRecords, (record) => record.rubricVersion).entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([rubricVersion, records]) => {
-      const marks = [...records].sort(compareRecords);
-      const targetRunCount = new Set(marks.map((mark) => mark.targetRun)).size;
-      const facets = [...groupBy(marks, (mark) => mark.facet).entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([facet, facetMarks]) => ({
-          facet,
-          count: facetMarks.length,
-          classifications: countValues(facetMarks.map((mark) => mark.classification)),
-          severities: countValues(facetMarks.map((mark) => mark.severity)),
-        }));
-      return {
-        rubricVersion,
-        status: targetRunCount >= 2 ? "evidence_available" : "insufficient_evidence",
-        comparableWorkEvaluations: marks.length,
-        comparableTargetRuns: targetRunCount,
-        targetRunCount,
-        evaluatorRunCount: new Set(marks.map((mark) => mark.evaluatorRun)).size,
-        classifications: countValues(marks.map((mark) => mark.classification)),
-        severities: countValues(marks.map((mark) => mark.severity)),
-        acceptedFirstPass: countValues(marks.map((mark) => mark.acceptedFirstPass)),
-        repairCountTotal: marks.reduce((total, mark) => total + mark.repairCount, 0),
-        confidence: countValues(marks.map((mark) => mark.confidence)),
-        uncertainty: countValues(marks.map((mark) => mark.uncertainty)),
-        evidenceClasses: countValues(marks.map((mark) => mark.evidenceClass)),
-        independence: countValues(marks.map((mark) => mark.independence)),
-        coverage: coverageSummary(marks),
-        facets,
-        marks: marks.map(markSummary),
-      };
-    });
+function rubricGroups(workHistory, currentWork) {
+  const historyByRubric = groupBy(workHistory, (record) => record.rubricVersion);
+  const currentByRubric = groupBy(currentWork, (record) => record.rubricVersion);
+  const rubrics = [...new Set([...historyByRubric.keys(), ...currentByRubric.keys()])].sort();
+  return rubrics.map((rubricVersion) => {
+    const history = [...(historyByRubric.get(rubricVersion) ?? [])].sort(compareRecords);
+    const marks = [...(currentByRubric.get(rubricVersion) ?? [])].sort(compareRecords);
+    const comparableMarks = marks.filter((mark) => mark.classification !== "superseded");
+    const comparableTargetRuns = new Set(comparableMarks.map((mark) => mark.targetRun)).size;
+    const facets = [...groupBy(marks, (mark) => mark.facet).entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([facet, facetMarks]) => ({
+        facet,
+        count: facetMarks.length,
+        classifications: countValues(facetMarks.map((mark) => mark.classification)),
+        severities: countValues(facetMarks.map((mark) => mark.severity)),
+      }));
+    return {
+      rubricVersion,
+      status: comparableTargetRuns >= 2 ? "evidence_available" : "insufficient_evidence",
+      workEvaluationReceipts: history.length,
+      currentWorkMarks: marks.length,
+      comparableWorkEvaluations: comparableMarks.length,
+      comparableTargetRuns,
+      targetRunCount: new Set(marks.map((mark) => mark.targetRun)).size,
+      evaluatorRunCount: new Set(marks.map((mark) => mark.evaluatorRun)).size,
+      classifications: countValues(marks.map((mark) => mark.classification)),
+      severities: countValues(marks.map((mark) => mark.severity)),
+      acceptedFirstPass: countValues(marks.map((mark) => mark.acceptedFirstPass)),
+      repairCountTotal: marks.reduce((total, mark) => total + mark.repairCount, 0),
+      confidence: countValues(marks.map((mark) => mark.confidence)),
+      uncertainty: countValues(marks.map((mark) => mark.uncertainty)),
+      evidenceClasses: countValues(marks.map((mark) => mark.evidenceClass)),
+      independence: countValues(marks.map((mark) => mark.independence)),
+      coverage: coverageSummary(marks),
+      facets,
+      marks: marks.map(markSummary),
+      markHistory: history.map(markSummary),
+    };
+  });
 }
 
 function findingSummary(finding) {
@@ -319,56 +357,63 @@ function findingSummary(finding) {
   };
 }
 
-function reviewerViews(reviewRecords) {
-  return [...groupBy(
-    reviewRecords,
+function reviewerViews(reviewHistory, currentReview) {
+  const historyGroups = groupBy(
+    reviewHistory,
     (record) => `${record.evaluatorRun}\u0000${record.rubricVersion}`,
-  ).values()]
-    .map((records) => {
-      const findings = [...records].sort(compareRecords);
-      return {
-        evaluatorRun: findings[0].evaluatorRun,
-        rubricVersion: findings[0].rubricVersion,
-        callsigns: [...new Set(findings.map((finding) => finding.evaluatorCallsign).filter(Boolean))].sort(),
-        findingCount: findings.length,
-        dispositions: countValues(findings.map((finding) => finding.disposition)),
-        severities: countValues(findings.map((finding) => finding.severity)),
-        confidence: countValues(findings.map((finding) => finding.confidence)),
-        uncertainty: countValues(findings.map((finding) => finding.uncertainty)),
-        coverage: coverageSummary(findings),
-        findings: findings.map(findingSummary),
-      };
-    })
-    .sort((left, right) => left.evaluatorRun.localeCompare(right.evaluatorRun)
-      || left.rubricVersion.localeCompare(right.rubricVersion));
+  );
+  const currentGroups = groupBy(
+    currentReview,
+    (record) => `${record.evaluatorRun}\u0000${record.rubricVersion}`,
+  );
+  const keys = [...new Set([...historyGroups.keys(), ...currentGroups.keys()])].sort();
+  return keys.map((key) => {
+    const history = [...(historyGroups.get(key) ?? [])].sort(compareRecords);
+    const findings = [...(currentGroups.get(key) ?? [])].sort(compareRecords);
+    const representative = findings[0] ?? history[0];
+    return {
+      evaluatorRun: representative.evaluatorRun,
+      rubricVersion: representative.rubricVersion,
+      callsigns: [...new Set(history.map((finding) => finding.evaluatorCallsign).filter(Boolean))].sort(),
+      findingReceiptCount: history.length,
+      findingCount: findings.length,
+      dispositions: countValues(findings.map((finding) => finding.disposition)),
+      severities: countValues(findings.map((finding) => finding.severity)),
+      confidence: countValues(findings.map((finding) => finding.confidence)),
+      uncertainty: countValues(findings.map((finding) => finding.uncertainty)),
+      coverage: coverageSummary(findings),
+      findings: findings.map(findingSummary),
+      findingHistory: history.map(findingSummary),
+    };
+  });
 }
 
-function limitations(records, groups, openFindings, excludedCount) {
+function limitations(currentRecords, groups, openFindings, excludedCount) {
   const result = [];
-  const evaluatorCount = new Set(records.map((record) => record.evaluatorRun)).size;
-  const coverage = coverageSummary(records);
+  const evaluatorCount = new Set(currentRecords.map((record) => record.evaluatorRun)).size;
+  const coverage = coverageSummary(currentRecords);
   if (!groups.some((group) => group.status === "evidence_available")) {
-    result.push({ code: "SMALL_SAMPLE", message: "No rubric group contains two distinct target runs." });
+    result.push({ code: "SMALL_SAMPLE", message: "No rubric group contains two distinct non-superseded target runs." });
   }
-  if (records.length > 0 && evaluatorCount <= 1) {
-    result.push({ code: "SINGLE_EVALUATOR", message: "Evidence is concentrated in one evaluator run." });
+  if (currentRecords.length > 0 && evaluatorCount <= 1) {
+    result.push({ code: "SINGLE_EVALUATOR", message: "Current evidence is concentrated in one evaluator run." });
   }
   if (groups.length > 1) {
     result.push({ code: "MIXED_RUBRICS", message: "Rubric versions are reported separately and are not averaged." });
   }
   if (openFindings.length > 0) {
-    result.push({ code: "OPEN_FINDINGS", message: "One or more findings remain unresolved or repair-required." });
+    result.push({ code: "OPEN_FINDINGS", message: "One or more current findings remain unresolved or repair-required." });
   }
   if (coverage.omissions.length > 0) {
-    result.push({ code: "MISSING_EVIDENCE", message: "Coverage declares missing evidence; omissions are not negative evidence." });
+    result.push({ code: "MISSING_EVIDENCE", message: "Current coverage declares missing evidence; omissions are not negative evidence." });
   }
   if (coverage.states.some((entry) => entry.value !== "complete")) {
-    result.push({ code: "PARTIAL_COVERAGE", message: "At least one receipt has partial or unavailable coverage." });
+    result.push({ code: "PARTIAL_COVERAGE", message: "At least one current mark or finding has partial or unavailable coverage." });
   }
   if (excludedCount > 0) {
-    result.push({ code: "INVALID_RECEIPTS_EXCLUDED", message: "Invalid evaluation-looking ledger records were excluded from evidence." });
+    result.push({ code: "INVALID_RECEIPTS_EXCLUDED", message: "Invalid or duplicate evaluation-looking ledger records were excluded from evidence." });
   }
-  if (records.length > 0) {
+  if (currentRecords.length > 0) {
     result.push({ code: "TASK_SELECTION_BIAS_UNKNOWN", message: "The selected receipts do not prove that the task sample is representative." });
   }
   return result;
@@ -391,30 +436,39 @@ export function buildEvaluationProjection({ events, repository, taskClass, targe
   if (!Array.isArray(events)) fail("EVALUATION_LEDGER_INVALID", "Evaluation projection requires an event array.");
 
   const selection = { repository, taskClass, targetRun: targetRun ?? null };
-  const selected = [];
+  const candidateRecords = [];
   const exclusions = [];
-  const selectedReceipts = new Set();
   for (const event of events) {
     const candidate = selectCandidate(event, selection);
     if (candidate.state === "selected") {
-      const receiptKey = `${candidate.record.receipt.source}\u0000${candidate.record.receipt.id}`;
-      if (selectedReceipts.has(receiptKey)) {
-        exclusions.push({ code: "EVALUATION_LEDGER_DUPLICATE_RECORD", digest: eventDigest(event) });
-      } else {
-        selectedReceipts.add(receiptKey);
-        selected.push(candidate.record);
-      }
+      candidateRecords.push({ record: candidate.record, digest: eventDigest(event) });
     } else if (candidate.state === "excluded") {
       exclusions.push({ code: candidate.code, digest: candidate.digest });
+    }
+  }
+
+  const selected = [];
+  const recordsByIdentity = groupBy(
+    candidateRecords,
+    (candidate) => `${candidate.record.receipt.source}\u0000${candidate.record.receipt.id}`,
+  );
+  for (const candidates of recordsByIdentity.values()) {
+    if (candidates.length === 1) selected.push(candidates[0].record);
+    else {
+      for (const candidate of candidates) {
+        exclusions.push({ code: "EVALUATION_LEDGER_DUPLICATE_RECORD", digest: candidate.digest });
+      }
     }
   }
   selected.sort(compareRecords);
   exclusions.sort((left, right) => left.code.localeCompare(right.code) || left.digest.localeCompare(right.digest));
 
-  const workRecords = selected.filter((record) => record.family === "work-evaluation");
-  const reviewRecords = selected.filter((record) => record.family === "review-finding");
-  const groups = rubricGroups(workRecords);
-  const openFindings = reviewRecords
+  const workHistory = selected.filter((record) => record.family === "work-evaluation");
+  const reviewHistory = selected.filter((record) => record.family === "review-finding");
+  const currentWork = currentWorkRecords(workHistory);
+  const currentReview = currentReviewRecords(reviewHistory);
+  const groups = rubricGroups(workHistory, currentWork);
+  const openFindings = currentReview
     .filter((record) => OPEN_FINDING_DISPOSITIONS.has(record.disposition))
     .sort(compareRecords)
     .map(findingSummary);
@@ -430,6 +484,7 @@ export function buildEvaluationProjection({ events, repository, taskClass, targe
     ]),
     exclusions,
   };
+  const currentRecords = [...currentWork, ...currentReview].sort(compareRecords);
 
   return {
     schemaVersion: 1,
@@ -439,17 +494,22 @@ export function buildEvaluationProjection({ events, repository, taskClass, targe
     sourceCursor: digest(JSON.stringify(cursorPayload)),
     receipts: {
       selected: selected.length,
-      workEvaluations: workRecords.length,
-      reviewFindings: reviewRecords.length,
+      workEvaluations: workHistory.length,
+      reviewFindings: reviewHistory.length,
+      currentWorkMarks: currentWork.length,
+      currentReviewFindings: currentReview.length,
       excluded: exclusions.length,
       excludedByCode: countValues(exclusions.map((item) => item.code)),
       identities: selected.map(receiptSummary),
     },
-    targets: targetViews(selected),
+    targets: targetViews(selected, currentWork, currentReview),
     rubricGroups: groups,
-    reviewerCalibration: reviewerViews(reviewRecords),
+    reviewerCalibration: reviewerViews(reviewHistory, currentReview),
     openFindings,
-    coverage: coverageSummary(selected),
-    limitations: limitations(selected, groups, openFindings, exclusions.length),
+    coverage: {
+      selectedReceipts: coverageSummary(selected),
+      currentEvidence: coverageSummary(currentRecords),
+    },
+    limitations: limitations(currentRecords, groups, openFindings, exclusions.length),
   };
 }
