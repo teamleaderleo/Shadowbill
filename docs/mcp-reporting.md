@@ -16,7 +16,7 @@ node src/main.js mcp --registry /path/to/repositories.json
 
 ## Proofwake projection tools
 
-Every Proofwake tool call reads one repository-registry snapshot and one event-ledger snapshot. The response is rebuilt from those immutable inputs with the same projection functions used by `proofwake fleet` and `proofwake inspect`, then passed through a content-minimising MCP disclosure boundary.
+Fleet, repository, and revision tools read one repository-registry snapshot and one event-ledger snapshot. Evaluation evidence reads one event-ledger snapshot and deliberately has no registry dependency. Every response is rebuilt from immutable inputs with the same projection functions used by the installed CLI, then passed through a content-minimising MCP disclosure boundary.
 
 ### `proofwake_fleet_status`
 
@@ -49,9 +49,31 @@ proofwake inspect FULL_SHA --repo owner/name --output json
 proofwake inspect FULL_SHA --repo enrolled-label --output json
 ```
 
-Unknown fields and malformed selectors or revisions produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, trust, coverage, attempts, reruns, recovery, and attention state remain unchanged.
+### `proofwake_evaluation_evidence`
 
-The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, prompts, responses, tokens, secrets, and environment values. Reviewed Proofwake adapter/provider URNs, public query-free HTTPS evidence links, and public GitHub API sources remain visible. Other observation sources become SHA-256-backed Proofwake source identifiers. Local, credential-bearing, query-bearing, arbitrary-URN, or otherwise unreviewed evidence references become digest-backed Proofwake evidence URNs.
+Required arguments:
+
+- `repository`: exact bounded `owner/name` repository identity
+- `taskClass`: bounded evaluation task token
+
+Optional argument:
+
+- `targetRun`: exact `run_...` target-run reference
+
+Returns the disclosed form of the same deterministic task-specific evidence view as:
+
+```bash
+proofwake evaluation --repo owner/name --task-class TOKEN --output json
+proofwake evaluation --repo owner/name --task-class TOKEN --target-run run_... --output json
+```
+
+The tool reads exactly one immutable ledger snapshot and does not read the repository registry. It preserves the merged projection's current marks and findings, immutable mark and finding histories, rubric separation, conservative distinct-target sufficiency, open findings, coverage, exclusions, limitations, and deterministic source cursor.
+
+Invalid arguments fail before any ledger or registry read. Unknown fields are rejected. The tool remains read-only even when the compatibility Shadowbill write tool is explicitly enabled.
+
+Unknown fields and malformed selectors, revisions, task classes, or target-run references produce bounded tool errors with stable machine-readable codes. Projection selection, version, cursor, repository identity, revision, status, signals, evidence digests and metadata, trust, coverage, attempts, reruns, recovery, current evaluation evidence, histories, and attention state remain unchanged.
+
+The disclosure boundary omits adapter receipt paths, error paths, content-derived configuration prose, checkout paths, source content, executed commands and output, logs, receipt bytes, wrapper extensions, prompts, responses, tokens, secrets, and environment values. Reviewed Proofwake adapter/provider URNs, public query-free HTTPS evidence links, and public GitHub API sources remain visible. Other observation sources become SHA-256-backed Proofwake source identifiers. Local, credential-bearing, query-bearing, arbitrary-URN, or otherwise unreviewed evidence references become digest-backed Proofwake evidence URNs.
 
 ## Shadowbill compatibility tools
 
