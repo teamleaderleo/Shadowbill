@@ -9,8 +9,8 @@ export function parseEvaluationReceiptJson(receiptJson) {
   return observation;
 }
 
-export async function ingestEvaluationReceipt({ store, receiptJson, now = new Date() }) {
-  const observation = parseEvaluationReceiptJson(receiptJson);
+export async function ingestEvaluationObservation({ store, observation, now = new Date() }) {
+  validateEvaluationObservation(observation);
   const result = await appendObservation({ store, observation, now });
   validateEvaluationObservation(result.observation);
   const record = observationLedgerRecord(result.observation);
@@ -28,4 +28,12 @@ export async function ingestEvaluationReceipt({ store, receiptJson, now = new Da
     ingestedAt: result.observation.data.ingestedAt,
     schemaVersion: 1,
   };
+}
+
+export async function ingestEvaluationReceipt({ store, receiptJson, now = new Date() }) {
+  return ingestEvaluationObservation({
+    store,
+    observation: parseEvaluationReceiptJson(receiptJson),
+    now,
+  });
 }
