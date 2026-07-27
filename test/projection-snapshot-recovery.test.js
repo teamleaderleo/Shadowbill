@@ -80,7 +80,14 @@ async function fixture(callback) {
     await writeFile(join(root, "package.json"), "{}\n");
     await writeFile(join(root, ".proofwake.json"), `${JSON.stringify(policy(), null, 2)}\n`);
     await git(root, "add", ".");
-    await git(root, "commit", "-qm", "initial");
+    await exec("git", ["-C", root, "commit", "-qm", "initial"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_DATE: "2026-07-26T09:00:00.000Z",
+        GIT_COMMITTER_DATE: "2026-07-26T09:00:00.000Z",
+      },
+    });
     const revision = await git(root, "rev-parse", "HEAD");
     const registryStore = new RepositoryRegistryStore(join(directory, "repositories.json"));
     await registryStore.enroll(await inspectRepositoryEnrollment(root));
