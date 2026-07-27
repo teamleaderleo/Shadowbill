@@ -111,6 +111,7 @@ test("merged fixtures produce a sparse task-specific evidence view", async () =>
   });
   assert.equal(report.rubricGroups.length, 1);
   assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 1);
+  assert.equal(report.rubricGroups[0].comparableTargetRuns, 1);
   assert.equal(report.rubricGroups[0].repairCountTotal, 1);
   assert.equal(report.openFindings.length, 1);
   assert.equal(report.openFindings[0].disposition, "upheld-repair-required");
@@ -120,7 +121,7 @@ test("merged fixtures produce a sparse task-specific evidence view", async () =>
   assert.equal(JSON.stringify(report).includes('"score"'), false);
 });
 
-test("two same-rubric work marks become evidence-available while target filtering remains sparse", async () => {
+test("two same-rubric target runs become evidence-available while target filtering remains sparse", async () => {
   const first = await fixture("stensibly-work-evaluation-repair-v1.json");
   const second = nextWork(first);
   const events = [observationLedgerRecord(second), observationLedgerRecord(first)];
@@ -129,6 +130,7 @@ test("two same-rubric work marks become evidence-available while target filterin
   assert.equal(report.status, "evidence_available");
   assert.equal(report.rubricGroups.length, 1);
   assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 2);
+  assert.equal(report.rubricGroups[0].comparableTargetRuns, 2);
   assert.equal(report.rubricGroups[0].targetRunCount, 2);
   assert.deepEqual(report.rubricGroups[0].acceptedFirstPass, [
     { value: false, count: 1 },
@@ -143,6 +145,26 @@ test("two same-rubric work marks become evidence-available while target filterin
   });
   assert.equal(selected.status, "insufficient_evidence");
   assert.equal(selected.receipts.selected, 1);
+});
+
+test("multiple receipts for one target run do not satisfy the sample gate", async () => {
+  const first = await fixture("stensibly-work-evaluation-repair-v1.json");
+  const second = nextWork(first, {
+    id: "stensibly.pr308.work-evaluation.follow-up.v1",
+    targetRun: "run_w01_oauth_implementation_01",
+    evaluatorRun: "run_w01_oauth_review_03",
+  });
+  const report = buildEvaluationProjection({
+    events: [observationLedgerRecord(first), observationLedgerRecord(second)],
+    repository,
+    taskClass,
+  });
+
+  assert.equal(report.receipts.workEvaluations, 2);
+  assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 2);
+  assert.equal(report.rubricGroups[0].comparableTargetRuns, 1);
+  assert.equal(report.status, "insufficient_evidence");
+  assert.ok(report.limitations.some((entry) => entry.code === "SMALL_SAMPLE"));
 });
 
 test("rubric versions remain separate and are never averaged", async () => {
@@ -163,6 +185,7 @@ test("rubric versions remain separate and are never averaged", async () => {
     ["stensibly-review-v1", 1, "insufficient_evidence"],
     ["stensibly-review-v2", 1, "insufficient_evidence"],
   ]);
+  assert.ok(report.limitations.some((entry) => entry.code === "SMALL_SAMPLE"));
   assert.ok(report.limitations.some((entry) => entry.code === "MIXED_RUBRICS"));
 });
 
@@ -192,6 +215,8 @@ test("invalid wrappers and specialised receipts are excluded without disclosing 
   badFingerprint.requestFingerprint = `sha256:${"0".repeat(64)}`;
   const badIdentity = clone(valid);
   badIdentity.id = "proofwake_observation_wrong";
+  const extraWrapper = clone(valid);
+  extraWrapper.hiddenPayload = "private-wrapper-sentinel";
   const unknown = clone(work);
   unknown.id = "stensibly.pr308.work-evaluation.unknown-fact.v1";
   unknown.data.facts.push({
@@ -201,20 +226,39 @@ test("invalid wrappers and specialised receipts are excluded without disclosing 
   const badSpecialised = observationLedgerRecord(unknown);
 
   const report = buildEvaluationProjection({
-    events: [valid, badFingerprint, badIdentity, badSpecialised],
+    events: [valid, badFingerprint, badIdentity, extraWrapper, badSpecialised],
     repository,
     taskClass,
   });
   assert.equal(report.receipts.selected, 1);
-  assert.equal(report.receipts.excluded, 3);
+  assert.equal(report.receipts.excluded, 4);
   assert.deepEqual(report.receipts.excludedByCode, [
     { value: "EVALUATION_LEDGER_FINGERPRINT_MISMATCH", count: 1 },
     { value: "EVALUATION_LEDGER_IDENTITY_MISMATCH", count: 1 },
+    { value: "EVALUATION_LEDGER_WRAPPER_MISMATCH", count: 1 },
     { value: "EVALUATION_UNKNOWN_FACT", count: 1 },
   ]);
   const publicOutput = JSON.stringify(report);
   assert.equal(publicOutput.includes("private-content-sentinel"), false);
+  assert.equal(publicOutput.includes("private-wrapper-sentinel"), false);
   assert.equal(publicOutput.includes("proofwake.evaluation.prompt"), false);
+});
+
+test("duplicate canonical ledger records cannot inflate evidence counts", async () => {
+  const work = await fixture("stensibly-work-evaluation-repair-v1.json");
+  const record = observationLedgerRecord(work);
+  const report = buildEvaluationProjection({
+    events: [record, clone(record)],
+    repository,
+    taskClass,
+  });
+
+  assert.equal(report.receipts.selected, 1);
+  assert.equal(report.receipts.excluded, 1);
+  assert.deepEqual(report.receipts.excludedByCode, [
+    { value: "EVALUATION_LEDGER_DUPLICATE_RECORD", count: 1 },
+  ]);
+  assert.equal(report.status, "insufficient_evidence");
 });
 
 test("projection rebuild is deterministic under ledger reordering", async () => {
