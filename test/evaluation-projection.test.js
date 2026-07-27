@@ -105,17 +105,21 @@ test("merged fixtures produce a sparse task-specific evidence view", async () =>
     selected: 2,
     workEvaluations: 1,
     reviewFindings: 1,
+    currentWorkMarks: 1,
+    currentReviewFindings: 1,
     excluded: 0,
     excludedByCode: [],
     identities: report.receipts.identities,
   });
   assert.equal(report.rubricGroups.length, 1);
+  assert.equal(report.rubricGroups[0].workEvaluationReceipts, 1);
+  assert.equal(report.rubricGroups[0].currentWorkMarks, 1);
   assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 1);
   assert.equal(report.rubricGroups[0].comparableTargetRuns, 1);
   assert.equal(report.rubricGroups[0].repairCountTotal, 1);
   assert.equal(report.openFindings.length, 1);
   assert.equal(report.openFindings[0].disposition, "upheld-repair-required");
-  assert.ok(report.coverage.omissions.some((entry) => entry.value === "proofwake.evaluation.cost"));
+  assert.ok(report.coverage.currentEvidence.omissions.some((entry) => entry.value === "proofwake.evaluation.cost"));
   assert.ok(report.limitations.some((entry) => entry.code === "SMALL_SAMPLE"));
   assert.ok(report.limitations.some((entry) => entry.code === "MISSING_EVIDENCE"));
   assert.equal(JSON.stringify(report).includes('"score"'), false);
@@ -147,10 +151,10 @@ test("two same-rubric target runs become evidence-available while target filteri
   assert.equal(selected.receipts.selected, 1);
 });
 
-test("multiple receipts for one target run do not satisfy the sample gate", async () => {
+test("multiple current marks for one target run do not satisfy the sample gate", async () => {
   const first = await fixture("stensibly-work-evaluation-repair-v1.json");
   const second = nextWork(first, {
-    id: "stensibly.pr308.work-evaluation.follow-up.v1",
+    id: "stensibly.pr308.work-evaluation.second-review.v1",
     targetRun: "run_w01_oauth_implementation_01",
     evaluatorRun: "run_w01_oauth_review_03",
   });
@@ -161,10 +165,52 @@ test("multiple receipts for one target run do not satisfy the sample gate", asyn
   });
 
   assert.equal(report.receipts.workEvaluations, 2);
+  assert.equal(report.receipts.currentWorkMarks, 2);
   assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 2);
   assert.equal(report.rubricGroups[0].comparableTargetRuns, 1);
   assert.equal(report.status, "insufficient_evidence");
   assert.ok(report.limitations.some((entry) => entry.code === "SMALL_SAMPLE"));
+});
+
+test("later work mark corrections replace current state without deleting history", async () => {
+  const first = await fixture("stensibly-work-evaluation-repair-v1.json");
+  const correction = nextWork(first, {
+    id: "stensibly.pr308.work-evaluation.corrected.v1",
+    targetRun: "run_w01_oauth_implementation_01",
+    evaluatorRun: "run_w01_oauth_review_01",
+  });
+  const report = buildEvaluationProjection({
+    events: [observationLedgerRecord(correction), observationLedgerRecord(first)],
+    repository,
+    taskClass,
+  });
+
+  assert.equal(report.receipts.workEvaluations, 2);
+  assert.equal(report.receipts.currentWorkMarks, 1);
+  const group = report.rubricGroups[0];
+  assert.equal(group.workEvaluationReceipts, 2);
+  assert.equal(group.currentWorkMarks, 1);
+  assert.equal(group.markHistory.length, 2);
+  assert.equal(group.marks.length, 1);
+  assert.equal(group.marks[0].receipt.id, correction.id);
+  assert.deepEqual(group.classifications, [{ value: "accepted", count: 1 }]);
+  assert.equal(group.repairCountTotal, 0);
+});
+
+test("superseded current marks remain visible but do not satisfy evidence sufficiency", async () => {
+  const first = await fixture("stensibly-work-evaluation-repair-v1.json");
+  const superseded = nextWork(first);
+  setFact(superseded, "proofwake.evaluation.classification", "superseded");
+  const report = buildEvaluationProjection({
+    events: [observationLedgerRecord(first), observationLedgerRecord(superseded)],
+    repository,
+    taskClass,
+  });
+
+  assert.equal(report.rubricGroups[0].currentWorkMarks, 2);
+  assert.equal(report.rubricGroups[0].comparableWorkEvaluations, 1);
+  assert.equal(report.rubricGroups[0].comparableTargetRuns, 1);
+  assert.equal(report.status, "insufficient_evidence");
 });
 
 test("rubric versions remain separate and are never averaged", async () => {
@@ -198,7 +244,10 @@ test("review dispositions remain individually inspectable", async () => {
   const report = buildEvaluationProjection({ events, repository, taskClass });
 
   assert.equal(report.receipts.reviewFindings, 4);
+  assert.equal(report.receipts.currentReviewFindings, 4);
   assert.equal(report.reviewerCalibration.length, 1);
+  assert.equal(report.reviewerCalibration[0].findingReceiptCount, 4);
+  assert.equal(report.reviewerCalibration[0].findingCount, 4);
   assert.deepEqual(report.reviewerCalibration[0].dispositions, dispositions
     .sort()
     .map((value) => ({ value, count: 1 })));
@@ -206,6 +255,33 @@ test("review dispositions remain individually inspectable", async () => {
     "unresolved",
     "upheld-repair-required",
   ]);
+});
+
+test("later finding dispositions clear stale open state while retaining history", async () => {
+  const base = await fixture("stensibly-review-finding-upheld-v1.json");
+  const unresolved = nextFinding(base, "unresolved", 0);
+  const rejected = clone(unresolved);
+  rejected.id = "stensibly.pr308.review-finding.rejected.latest.v1";
+  rejected.time = "2026-07-27T12:30:00.000Z";
+  rejected.data.observedAt = "2026-07-27T12:31:00.000Z";
+  rejected.data.ingestedAt = "2026-07-27T12:50:00.000Z";
+  setFact(rejected, "proofwake.review.disposition", "rejected");
+
+  const report = buildEvaluationProjection({
+    events: [observationLedgerRecord(rejected), observationLedgerRecord(unresolved)],
+    repository,
+    taskClass,
+  });
+
+  assert.equal(report.receipts.reviewFindings, 2);
+  assert.equal(report.receipts.currentReviewFindings, 1);
+  const reviewer = report.reviewerCalibration[0];
+  assert.equal(reviewer.findingReceiptCount, 2);
+  assert.equal(reviewer.findingCount, 1);
+  assert.equal(reviewer.findingHistory.length, 2);
+  assert.deepEqual(reviewer.dispositions, [{ value: "rejected", count: 1 }]);
+  assert.equal(reviewer.findings[0].receipt.id, rejected.id);
+  assert.equal(report.openFindings.length, 0);
 });
 
 test("invalid wrappers and specialised receipts are excluded without disclosing content", async () => {
@@ -244,7 +320,7 @@ test("invalid wrappers and specialised receipts are excluded without disclosing 
   assert.equal(publicOutput.includes("proofwake.evaluation.prompt"), false);
 });
 
-test("duplicate canonical ledger records cannot inflate evidence counts", async () => {
+test("duplicate canonical ledger records are all excluded and cannot choose a winner", async () => {
   const work = await fixture("stensibly-work-evaluation-repair-v1.json");
   const record = observationLedgerRecord(work);
   const report = buildEvaluationProjection({
@@ -253,29 +329,39 @@ test("duplicate canonical ledger records cannot inflate evidence counts", async 
     taskClass,
   });
 
-  assert.equal(report.receipts.selected, 1);
-  assert.equal(report.receipts.excluded, 1);
+  assert.equal(report.receipts.selected, 0);
+  assert.equal(report.receipts.excluded, 2);
   assert.deepEqual(report.receipts.excludedByCode, [
-    { value: "EVALUATION_LEDGER_DUPLICATE_RECORD", count: 1 },
+    { value: "EVALUATION_LEDGER_DUPLICATE_RECORD", count: 2 },
   ]);
   assert.equal(report.status, "insufficient_evidence");
 });
 
-test("projection rebuild is deterministic under ledger reordering", async () => {
+test("projection rebuild is deterministic under ledger and object-key reordering", async () => {
   const work = await fixture("stensibly-work-evaluation-repair-v1.json");
   const review = await fixture("stensibly-review-finding-upheld-v1.json");
   const second = nextWork(work);
+  const invalid = observationLedgerRecord(work);
+  invalid.hiddenPayload = "not-disclosed";
+  const reorderedInvalid = Object.fromEntries(Object.entries(invalid).reverse());
   const events = [
     observationLedgerRecord(work),
     observationLedgerRecord(review),
     observationLedgerRecord(second),
+    invalid,
+  ];
+  const reversed = [
+    reorderedInvalid,
+    observationLedgerRecord(second),
+    observationLedgerRecord(review),
+    observationLedgerRecord(work),
   ];
   const forward = buildEvaluationProjection({ events, repository, taskClass });
-  const reverse = buildEvaluationProjection({ events: [...events].reverse(), repository, taskClass });
+  const reverse = buildEvaluationProjection({ events: reversed, repository, taskClass });
   assert.deepEqual(reverse, forward);
 });
 
-test("installed evaluation CLI preserves the ledger and has human/JSON parity", async () => {
+test("installed evaluation CLI preserves the ledger and has human/JSON evidence parity", async () => {
   await temporary(async (directory) => {
     const dataPath = join(directory, "private-ledger-name.jsonl");
     const work = await fixture("stensibly-work-evaluation-repair-v1.json");
@@ -297,6 +383,8 @@ test("installed evaluation CLI preserves the ledger and has human/JSON parity", 
     assert.equal(json.command, "evaluation");
     assert.equal(json.status, "insufficient_evidence");
     assert.equal(json.receipts.selected, 2);
+    assert.equal(json.receipts.currentWorkMarks, 1);
+    assert.equal(json.receipts.currentReviewFindings, 1);
     assert.equal(result.stdout.includes(dataPath), false);
 
     result = await runProcess(process.execPath, [
@@ -308,7 +396,14 @@ test("installed evaluation CLI preserves the ledger and has human/JSON parity", 
     ]);
     assert.equal(result.code, 0, result.stderr);
     assert.match(result.stdout, /Status: insufficient_evidence/u);
+    assert.match(result.stdout, /Work: 1 receipts; 1 current marks/u);
+    assert.match(result.stdout, /Review: 1 receipts; 1 current findings/u);
+    assert.match(result.stdout, /classification repair-required: 1/u);
+    assert.match(result.stdout, /confidence high: 1/u);
+    assert.match(result.stdout, /uncertainty bounded: 1/u);
     assert.match(result.stdout, /Open findings: 1/u);
+    assert.match(result.stdout, /Selected-receipt coverage:/u);
+    assert.match(result.stdout, /Current-evidence coverage:/u);
     assert.equal(result.stdout.includes(dataPath), false);
     assert.equal(await readFile(dataPath, "utf8"), original);
   });
