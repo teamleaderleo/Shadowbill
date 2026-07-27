@@ -130,7 +130,7 @@ test("exact JSON parsing preserves duplicate-key, depth, and total-byte bounds",
   observation.data.facts.push({ name: "proofwake.evaluation.extra-depth", value: nested });
   assert.throws(
     () => parseEvaluationReceiptJson(JSON.stringify(observation)),
-    (error) => error?.code === "OBSERVATION_MAX_DEPTH",
+    (error) => error?.code === "OBSERVATION_TOO_DEEP",
   );
 
   const oversized = `${receiptJson.slice(0, -2)}, "padding": "${"x".repeat(70_000)}"\n}`;
