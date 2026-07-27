@@ -192,6 +192,7 @@ test("Proofwake projection tools are discovered in read-only and write-enabled m
     "proofwake_fleet_status",
     "proofwake_repository_status",
     "proofwake_revision_evidence",
+    "proofwake_evaluation_evidence",
   ];
   assert.deepEqual(readOnly[1].result.tools.map((tool) => tool.name), expectedReadTools);
   assert.deepEqual(writable[1].result.tools.map((tool) => tool.name), [
