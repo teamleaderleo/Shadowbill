@@ -144,6 +144,14 @@ function writeJsonLine(output, message) {
   });
 }
 
+function resolvedStdioOptions(options) {
+  if (Object.hasOwn(options, "allowEvaluationWrites")) return options;
+  return {
+    ...options,
+    allowEvaluationWrites: process.argv.includes("--allow-evaluation-writes"),
+  };
+}
+
 /**
  * Runs one newline-delimited combined MCP JSON-RPC session over stdio streams.
  * @param {Parameters<typeof createProofwakeMcpSession>[0]} options
@@ -153,7 +161,7 @@ export async function runProofwakeMcpStdioServer(options, streams = {}) {
   const input = streams.input ?? process.stdin;
   const output = streams.output ?? process.stdout;
   const maximumLineBytes = streams.maximumLineBytes ?? MAX_STDIO_LINE_BYTES;
-  const session = createProofwakeMcpSession(options);
+  const session = createProofwakeMcpSession(resolvedStdioOptions(options));
   let buffer = "";
   let queue = Promise.resolve();
 
