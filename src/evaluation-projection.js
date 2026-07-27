@@ -11,6 +11,14 @@ const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const RUN_REFERENCE = /^run_[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/u;
 const SUPPORTED_TYPES = new Set([WORK_EVALUATION_TYPE, REVIEW_FINDING_TYPE]);
 const OPEN_FINDING_DISPOSITIONS = new Set(["unresolved", "upheld-repair-required"]);
+const WRAPPER_KEYS = new Set([
+  "type",
+  "id",
+  "timestamp",
+  "requestFingerprint",
+  "observationIdentity",
+  "observation",
+]);
 
 export class EvaluationProjectionError extends Error {
   constructor(code, message) {
@@ -75,7 +83,14 @@ function exclusionCode(error) {
   return "EVALUATION_RECEIPT_INVALID";
 }
 
+function hasExactWrapperKeys(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return false;
+  const keys = Object.keys(event);
+  return keys.length === WRAPPER_KEYS.size && keys.every((key) => WRAPPER_KEYS.has(key));
+}
+
 function wrapperError(event, expected) {
+  if (!hasExactWrapperKeys(event)) return "EVALUATION_LEDGER_WRAPPER_MISMATCH";
   if (event.id !== expected.id) return "EVALUATION_LEDGER_IDENTITY_MISMATCH";
   if (event.timestamp !== expected.timestamp) return "EVALUATION_LEDGER_TIMESTAMP_MISMATCH";
   if (event.requestFingerprint !== expected.requestFingerprint) {
@@ -255,6 +270,7 @@ function rubricGroups(workRecords) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([rubricVersion, records]) => {
       const marks = [...records].sort(compareRecords);
+      const targetRunCount = new Set(marks.map((mark) => mark.targetRun)).size;
       const facets = [...groupBy(marks, (mark) => mark.facet).entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([facet, facetMarks]) => ({
@@ -265,9 +281,10 @@ function rubricGroups(workRecords) {
         }));
       return {
         rubricVersion,
-        status: marks.length >= 2 ? "evidence_available" : "insufficient_evidence",
+        status: targetRunCount >= 2 ? "evidence_available" : "insufficient_evidence",
         comparableWorkEvaluations: marks.length,
-        targetRunCount: new Set(marks.map((mark) => mark.targetRun)).size,
+        comparableTargetRuns: targetRunCount,
+        targetRunCount,
         evaluatorRunCount: new Set(marks.map((mark) => mark.evaluatorRun)).size,
         classifications: countValues(marks.map((mark) => mark.classification)),
         severities: countValues(marks.map((mark) => mark.severity)),
@@ -326,12 +343,12 @@ function reviewerViews(reviewRecords) {
       || left.rubricVersion.localeCompare(right.rubricVersion));
 }
 
-function limitations(records, workRecords, groups, openFindings, excludedCount) {
+function limitations(records, groups, openFindings, excludedCount) {
   const result = [];
   const evaluatorCount = new Set(records.map((record) => record.evaluatorRun)).size;
   const coverage = coverageSummary(records);
-  if (workRecords.length < 2) {
-    result.push({ code: "SMALL_SAMPLE", message: "Fewer than two comparable work evaluations are available." });
+  if (!groups.some((group) => group.status === "evidence_available")) {
+    result.push({ code: "SMALL_SAMPLE", message: "No rubric group contains two distinct target runs." });
   }
   if (records.length > 0 && evaluatorCount <= 1) {
     result.push({ code: "SINGLE_EVALUATOR", message: "Evidence is concentrated in one evaluator run." });
@@ -376,10 +393,20 @@ export function buildEvaluationProjection({ events, repository, taskClass, targe
   const selection = { repository, taskClass, targetRun: targetRun ?? null };
   const selected = [];
   const exclusions = [];
+  const selectedReceipts = new Set();
   for (const event of events) {
     const candidate = selectCandidate(event, selection);
-    if (candidate.state === "selected") selected.push(candidate.record);
-    else if (candidate.state === "excluded") exclusions.push({ code: candidate.code, digest: candidate.digest });
+    if (candidate.state === "selected") {
+      const receiptKey = `${candidate.record.receipt.source}\u0000${candidate.record.receipt.id}`;
+      if (selectedReceipts.has(receiptKey)) {
+        exclusions.push({ code: "EVALUATION_LEDGER_DUPLICATE_RECORD", digest: eventDigest(event) });
+      } else {
+        selectedReceipts.add(receiptKey);
+        selected.push(candidate.record);
+      }
+    } else if (candidate.state === "excluded") {
+      exclusions.push({ code: candidate.code, digest: candidate.digest });
+    }
   }
   selected.sort(compareRecords);
   exclusions.sort((left, right) => left.code.localeCompare(right.code) || left.digest.localeCompare(right.digest));
@@ -423,6 +450,6 @@ export function buildEvaluationProjection({ events, repository, taskClass, targe
     reviewerCalibration: reviewerViews(reviewRecords),
     openFindings,
     coverage: coverageSummary(selected),
-    limitations: limitations(selected, workRecords, groups, openFindings, exclusions.length),
+    limitations: limitations(selected, groups, openFindings, exclusions.length),
   };
 }
