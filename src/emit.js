@@ -111,9 +111,17 @@ export async function readBoundedObservationStream(stream) {
   return decodeUtf8(Buffer.concat(chunks, size));
 }
 
+export async function appendObservation({ store, observation, now = new Date() }) {
+  const accepted = structuredClone(observation);
+  accepted.data = { ...accepted.data, ingestedAt: now.toISOString() };
+  validateObservation(accepted);
+  return new ObservationLedger(store).append(accepted);
+}
+
 export async function emitObservation({ store, text, now = new Date() }) {
-  const observation = parseObservationJson(text);
-  observation.data = { ...observation.data, ingestedAt: now.toISOString() };
-  validateObservation(observation);
-  return new ObservationLedger(store).append(observation);
+  return appendObservation({
+    store,
+    observation: parseObservationJson(text),
+    now,
+  });
 }
