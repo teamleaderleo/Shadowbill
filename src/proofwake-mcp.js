@@ -1,5 +1,6 @@
 import { createShadowbillMcpSession } from "./mcp.js";
 import { createDisclosedProofwakeProjectionMcp } from "./disclosed-projection-mcp.js";
+import { createEvaluationIngestMcp } from "./evaluation-ingest-mcp.js";
 
 const MAX_STDIO_LINE_BYTES = 1_000_000;
 
@@ -23,15 +24,20 @@ function rpcError(id, code, message, data) {
   };
 }
 
-function proofwakeInstructions(existing) {
-  const prefix = "Use proofwake_fleet_status, proofwake_repository_status, proofwake_revision_evidence, and proofwake_evaluation_evidence for read-only Proofwake evidence projections.";
+function proofwakeInstructions(existing, allowEvaluationWrites) {
+  const readPrefix = "Use proofwake_fleet_status, proofwake_repository_status, proofwake_revision_evidence, and proofwake_evaluation_evidence for read-only Proofwake evidence projections.";
+  const writePrefix = allowEvaluationWrites
+    ? "Use proofwake_submit_evaluation_receipt only to append one complete bounded evaluation receipt; it records evidence and grants no coordination authority."
+    : "";
+  const prefix = [readPrefix, writePrefix].filter(Boolean).join(" ");
   return typeof existing === "string" && existing.length > 0 ? `${prefix} ${existing}` : prefix;
 }
 
-function withProjectionTools(tools, projectionTools) {
+function withProofwakeTools(tools, projectionTools, evaluationWriteTools) {
   const writeIndex = tools.findIndex((tool) => tool.name === "shadowbill_record_chat_turn");
-  if (writeIndex === -1) return [...tools, ...projectionTools];
-  return [...tools.slice(0, writeIndex), ...projectionTools, ...tools.slice(writeIndex)];
+  const proofwakeTools = [...projectionTools, ...evaluationWriteTools];
+  if (writeIndex === -1) return [...tools, ...proofwakeTools];
+  return [...tools.slice(0, writeIndex), ...proofwakeTools, ...tools.slice(writeIndex)];
 }
 
 /**
@@ -44,6 +50,7 @@ function withProjectionTools(tools, projectionTools) {
  *   profile?: import('./types.js').EstimationProfile,
  *   timeZone: string,
  *   allowWrites?: boolean,
+ *   allowEvaluationWrites?: boolean,
  *   now?: () => Date
  * }} options
  */
@@ -54,6 +61,11 @@ export function createProofwakeMcpSession(options) {
     eventStore: options.store,
     now: options.now,
   });
+  const evaluationIngest = createEvaluationIngestMcp({
+    store: options.store,
+    now: options.now,
+  });
+  const evaluationWriteTools = options.allowEvaluationWrites ? evaluationIngest.tools : [];
   let initialized = false;
 
   return {
@@ -69,7 +81,10 @@ export function createProofwakeMcpSession(options) {
             ...response,
             result: {
               ...response.result,
-              instructions: proofwakeInstructions(response.result.instructions),
+              instructions: proofwakeInstructions(
+                response.result.instructions,
+                options.allowEvaluationWrites === true,
+              ),
             },
           };
         }
@@ -83,7 +98,11 @@ export function createProofwakeMcpSession(options) {
           ...response,
           result: {
             ...response.result,
-            tools: withProjectionTools(response.result.tools, projections.tools),
+            tools: withProofwakeTools(
+              response.result.tools,
+              projections.tools,
+              evaluationWriteTools,
+            ),
           },
         };
       }
@@ -92,8 +111,18 @@ export function createProofwakeMcpSession(options) {
           isObject(message.params) && typeof message.params.name === "string" &&
           (message.params.arguments === undefined || isObject(message.params.arguments)) &&
           message.params.task === undefined) {
-        const result = await projections.callTool(message.params.name, message.params.arguments);
-        if (result !== null) return rpcResult(message.id, result);
+        const projectionResult = await projections.callTool(
+          message.params.name,
+          message.params.arguments,
+        );
+        if (projectionResult !== null) return rpcResult(message.id, projectionResult);
+        if (options.allowEvaluationWrites) {
+          const ingestResult = await evaluationIngest.callTool(
+            message.params.name,
+            message.params.arguments,
+          );
+          if (ingestResult !== null) return rpcResult(message.id, ingestResult);
+        }
       }
 
       return response;
@@ -115,6 +144,14 @@ function writeJsonLine(output, message) {
   });
 }
 
+function resolvedStdioOptions(options) {
+  if (Object.hasOwn(options, "allowEvaluationWrites")) return options;
+  return {
+    ...options,
+    allowEvaluationWrites: process.argv.includes("--allow-evaluation-writes"),
+  };
+}
+
 /**
  * Runs one newline-delimited combined MCP JSON-RPC session over stdio streams.
  * @param {Parameters<typeof createProofwakeMcpSession>[0]} options
@@ -124,7 +161,7 @@ export async function runProofwakeMcpStdioServer(options, streams = {}) {
   const input = streams.input ?? process.stdin;
   const output = streams.output ?? process.stdout;
   const maximumLineBytes = streams.maximumLineBytes ?? MAX_STDIO_LINE_BYTES;
-  const session = createProofwakeMcpSession(options);
+  const session = createProofwakeMcpSession(resolvedStdioOptions(options));
   let buffer = "";
   let queue = Promise.resolve();
 
