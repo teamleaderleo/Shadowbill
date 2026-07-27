@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runIngestAdapterCommand } from "./adapter-cli.js";
 import { runDoctorCommand } from "./doctor-command.js";
+import { runEvaluationCommand } from "./evaluation-cli.js";
 import { runFailuresCommand, runRecoveriesCommand } from "./history-report-cli.js";
 import { resolveStorageIdentity } from "./identity.js";
 import { emitObservation, readBoundedObservationFile, readBoundedObservationStream } from "./emit.js";
@@ -37,6 +38,8 @@ Commands:
   inspect [REVISION] --repo owner/name [--registry PATH] [--data PATH]
                      [--output human|json]
   fleet [--registry PATH] [--data PATH] [--output human|json]
+  evaluation --repo owner/name --task-class TOKEN [--target-run run_...]
+             [--data PATH] [--output human|json]
   failures [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
   recoveries [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
   status [--json]
@@ -52,8 +55,9 @@ Emit accepts one complete Proofwake observation v1 document. Enrolment is a dry 
 unless --write is supplied. A tracked, clean .proofwake.json is authoritative.
 Run launches one argument vector without a shell and records a bounded terminal receipt.
 Native adapter ingestion validates declared external receipts and artifact digests before indexing.
-Inspect and fleet rebuild current evidence projections. Failures and recoveries report bounded
-policy-matched history from the registry and accepted ledger.
+Inspect and fleet rebuild current revision evidence. Evaluation rebuilds one task-specific,
+rubric-separated evidence view and returns insufficient_evidence for sparse samples.
+Failures and recoveries report bounded policy-matched history from the registry and accepted ledger.
 Doctor checks the active ledger, optional estimate module, repository registry, enrolled
 checkouts, policies, and declared adapter receipt paths without changing them.
 
@@ -199,6 +203,8 @@ if (command === undefined || command === "help" || command === "--help" || comma
   await runInspectCommand(process.argv.slice(3));
 } else if (command === "fleet") {
   await runFleetCommand(process.argv.slice(3));
+} else if (command === "evaluation") {
+  await runEvaluationCommand(process.argv.slice(3));
 } else if (command === "failures") {
   await runFailuresCommand(process.argv.slice(3));
 } else if (command === "recoveries") {
