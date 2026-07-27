@@ -44,7 +44,7 @@ Commands:
   recoveries [--days 1..365] [--registry PATH] [--data PATH] [--output human|json]
   status [--json]
   serve [--port 7337] [--github-secret SECRET] [--allowed-hosts HOSTS]
-  mcp [--registry PATH] [--allow-writes]
+  mcp [--registry PATH] [--allow-writes] [--allow-evaluation-writes]
   report [--date YYYY-MM-DD] [--days 1..365] [--by-repository] [--json]
   doctor [--registry PATH] [--data PATH] [--collector-token-file PATH]
          [--pricing PATH] [--model MODEL] [--timezone IANA_NAME] [--json]
@@ -57,6 +57,7 @@ Run launches one argument vector without a shell and records a bounded terminal 
 Native adapter ingestion validates declared external receipts and artifact digests before indexing.
 Inspect and fleet rebuild current revision evidence. Evaluation rebuilds one task-specific,
 rubric-separated evidence view and returns insufficient_evidence for sparse samples.
+The MCP evaluation write tool is absent unless --allow-evaluation-writes is supplied.
 Failures and recoveries report bounded policy-matched history from the registry and accepted ledger.
 Doctor checks the active ledger, optional estimate module, repository registry, enrolled
 checkouts, policies, and declared adapter receipt paths without changing them.
