@@ -24,7 +24,7 @@ function rpcError(id, code, message, data) {
 }
 
 function proofwakeInstructions(existing) {
-  const prefix = "Use proofwake_fleet_status, proofwake_repository_status, and proofwake_revision_evidence for Proofwake evidence projections.";
+  const prefix = "Use proofwake_fleet_status, proofwake_repository_status, proofwake_revision_evidence, and proofwake_evaluation_evidence for read-only Proofwake evidence projections.";
   return typeof existing === "string" && existing.length > 0 ? `${prefix} ${existing}` : prefix;
 }
 
