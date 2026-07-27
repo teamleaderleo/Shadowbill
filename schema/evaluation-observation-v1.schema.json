@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/teamleaderleo/proofwake/main/schema/evaluation-observation-v1.schema.json",
+  "title": "ProofWake evaluation observation v1",
+  "description": "A strict observation-v1 overlay for work evaluation and review-finding disposition events. The zero-dependency JavaScript validator is authoritative for receipt-family fact allowlists, scalar types, enum values, exact run references, and cross-field relations.",
+  "allOf": [
+    {
+      "$ref": "observation-v1.schema.json"
+    },
+    {
+      "type": "object",
+      "required": ["type", "subject", "data"],
+      "properties": {
+        "type": {
+          "enum": [
+            "proofwake.work.evaluation.observed.v1",
+            "proofwake.review.finding.dispositioned.v1"
+          ]
+        },
+        "subject": {
+          "pattern": "^repo:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@sha:[a-f0-9]{40}$"
+        },
+        "data": {
+          "type": "object",
+          "required": ["kind", "relationships", "facts", "evidence"],
+          "properties": {
+            "kind": {
+              "const": "domain-check"
+            },
+            "relationships": {
+              "type": "object",
+              "required": ["repository", "revision", "run"]
+            },
+            "facts": {
+              "type": "array",
+              "contains": {
+                "type": "object",
+                "required": ["name", "value"],
+                "properties": {
+                  "name": {
+                    "const": "proofwake.evaluation.schema-version"
+                  },
+                  "value": {
+                    "const": 1
+                  }
+                }
+              }
+            },
+            "evidence": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "proofwake.work.evaluation.observed.v1"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "properties": {
+              "facts": {
+                "items": {
+                  "properties": {
+                    "name": {
+                      "enum": [
+                        "proofwake.evaluation.schema-version",
+                        "proofwake.evaluation.task-class",
+                        "proofwake.evaluation.rubric-version",
+                        "proofwake.evaluation.target-run",
+                        "proofwake.evaluation.evaluator-run",
+                        "proofwake.evaluation.target-callsign",
+                        "proofwake.evaluation.evaluator-callsign",
+                        "proofwake.evaluation.model-profile",
+                        "proofwake.evaluation.adapter-profile",
+                        "proofwake.evaluation.independence",
+                        "proofwake.evaluation.evidence-class",
+                        "proofwake.evaluation.confidence",
+                        "proofwake.evaluation.uncertainty",
+                        "proofwake.evaluation.facet",
+                        "proofwake.evaluation.classification",
+                        "proofwake.evaluation.severity",
+                        "proofwake.evaluation.accepted-first-pass",
+                        "proofwake.evaluation.repair-count"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "data": {
+            "properties": {
+              "facts": {
+                "items": {
+                  "properties": {
+                    "name": {
+                      "enum": [
+                        "proofwake.evaluation.schema-version",
+                        "proofwake.evaluation.task-class",
+                        "proofwake.evaluation.rubric-version",
+                        "proofwake.evaluation.target-run",
+                        "proofwake.evaluation.evaluator-run",
+                        "proofwake.evaluation.target-callsign",
+                        "proofwake.evaluation.evaluator-callsign",
+                        "proofwake.evaluation.model-profile",
+                        "proofwake.evaluation.adapter-profile",
+                        "proofwake.evaluation.independence",
+                        "proofwake.evaluation.evidence-class",
+                        "proofwake.evaluation.confidence",
+                        "proofwake.evaluation.uncertainty",
+                        "proofwake.review.finding-id",
+                        "proofwake.review.finding-class",
+                        "proofwake.review.disposition",
+                        "proofwake.review.severity",
+                        "proofwake.review.clearing-condition"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

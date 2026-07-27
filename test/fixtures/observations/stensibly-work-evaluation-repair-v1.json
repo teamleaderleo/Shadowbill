@@ -1,0 +1,71 @@
+{
+  "specversion": "1.0",
+  "source": "urn:stensibly:workspace:default",
+  "subject": "repo:teamleaderleo/stensibly@sha:3a0c3823b50cc347a68b8e8f2e17ea7ea10499bd",
+  "dataschema": "urn:proofwake:schema:observation:v1",
+  "id": "stensibly.pr308.work-evaluation.repair.v1",
+  "type": "proofwake.work.evaluation.observed.v1",
+  "time": "2026-07-27T12:12:00.000Z",
+  "data": {
+    "schemaVersion": 1,
+    "adapter": {
+      "name": "stensibly-manual-backfill",
+      "version": "0.1.0",
+      "mappingVersion": 1,
+      "trust": "local-operator",
+      "sourceSchema": "urn:stensibly:schema:evaluation:v1",
+      "sourceSchemaVersion": "1"
+    },
+    "kind": "domain-check",
+    "status": "warning",
+    "timeSource": "producer",
+    "observedAt": "2026-07-27T12:13:00.000Z",
+    "ingestedAt": "2026-07-27T12:30:00.000Z",
+    "relationships": {
+      "repository": "teamleaderleo/stensibly",
+      "revision": "3a0c3823b50cc347a68b8e8f2e17ea7ea10499bd",
+      "run": "run_w01_oauth_implementation_01",
+      "correlations": ["item_220", "pr_308", "review_4786492776"]
+    },
+    "facts": [
+      { "name": "proofwake.evaluation.schema-version", "value": 1 },
+      { "name": "proofwake.evaluation.task-class", "value": "oauth-client-lifecycle" },
+      { "name": "proofwake.evaluation.rubric-version", "value": "stensibly-review-v1" },
+      { "name": "proofwake.evaluation.target-run", "value": "run_w01_oauth_implementation_01" },
+      { "name": "proofwake.evaluation.evaluator-run", "value": "run_w01_oauth_review_01" },
+      { "name": "proofwake.evaluation.target-callsign", "value": "Forge" },
+      { "name": "proofwake.evaluation.evaluator-callsign", "value": "Relay" },
+      { "name": "proofwake.evaluation.independence", "value": "independent" },
+      { "name": "proofwake.evaluation.evidence-class", "value": "observed" },
+      { "name": "proofwake.evaluation.confidence", "value": "high" },
+      { "name": "proofwake.evaluation.uncertainty", "value": "bounded" },
+      { "name": "proofwake.evaluation.facet", "value": "implementation-correctness" },
+      { "name": "proofwake.evaluation.classification", "value": "repair-required" },
+      { "name": "proofwake.evaluation.severity", "value": "high" },
+      { "name": "proofwake.evaluation.accepted-first-pass", "value": false },
+      { "name": "proofwake.evaluation.repair-count", "value": 1 }
+    ],
+    "evidence": [
+      {
+        "uri": "urn:stensibly:review:4786492776",
+        "digest": "sha256:400c06c13776e4b1652a8d4311a774e84b4d5a4d7daf1bacf53af72e4556e36c",
+        "mediaType": "application/json",
+        "producer": "stensibly",
+        "schema": "urn:stensibly:schema:review-verdict:v1",
+        "state": "verified",
+        "disclosure": "private-metadata"
+      }
+    ],
+    "coverage": {
+      "state": "partial",
+      "redacted": false,
+      "truncated": false,
+      "omitted": [
+        "proofwake.evaluation.model-profile",
+        "proofwake.evaluation.adapter-profile",
+        "proofwake.evaluation.cost",
+        "proofwake.evaluation.latency"
+      ]
+    }
+  }
+}
