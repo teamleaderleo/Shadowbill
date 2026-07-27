@@ -113,13 +113,13 @@ export function createEvaluationIngestMcp(options) {
     async callTool(name, args) {
       if (name !== EVALUATION_INGEST_TOOL.name) return null;
       try {
+        const receiptJson = validateArguments(args);
         if (!options.store || typeof options.store.appendIdempotent !== "function") {
           throw new EvaluationIngestMcpError(
             "PROOFWAKE_MCP_LEDGER_UNAVAILABLE",
             "Proofwake ledger is unavailable.",
           );
         }
-        const receiptJson = validateArguments(args);
         const now = typeof options.now === "function" ? options.now() : new Date();
         return toolResult(await ingestEvaluationReceipt({
           store: options.store,
