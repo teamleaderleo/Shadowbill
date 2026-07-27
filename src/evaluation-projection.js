@@ -19,6 +19,7 @@ const WRAPPER_KEYS = new Set([
   "observationIdentity",
   "observation",
 ]);
+const OBSERVATION_IDENTITY_KEYS = new Set(["source", "id"]);
 
 export class EvaluationProjectionError extends Error {
   constructor(code, message) {
@@ -80,6 +81,14 @@ function factMap(observation) {
   return new Map(observation.data.facts.map((fact) => [fact.name, fact.value]));
 }
 
+function rawFactValue(observation, name) {
+  const facts = observation?.data?.facts;
+  if (!Array.isArray(facts)) return { state: "unavailable", value: undefined };
+  const matches = facts.filter((fact) => fact && typeof fact === "object" && fact.name === name);
+  if (matches.length !== 1) return { state: "unavailable", value: undefined };
+  return { state: "available", value: matches[0].value };
+}
+
 function subjectMatchesRepository(observation, repository) {
   return typeof observation?.subject === "string"
     && observation.subject.startsWith(`repo:${repository}@sha:`);
@@ -91,22 +100,25 @@ function exclusionCode(error) {
   return "EVALUATION_RECEIPT_INVALID";
 }
 
-function hasExactWrapperKeys(event) {
-  if (!event || typeof event !== "object" || Array.isArray(event)) return false;
-  const keys = Object.keys(event);
-  return keys.length === WRAPPER_KEYS.size && keys.every((key) => WRAPPER_KEYS.has(key));
+function hasExactKeys(value, expected) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === expected.size && keys.every((key) => expected.has(key));
 }
 
 function wrapperError(event, expected) {
-  if (!hasExactWrapperKeys(event)) return "EVALUATION_LEDGER_WRAPPER_MISMATCH";
+  if (!hasExactKeys(event, WRAPPER_KEYS)) return "EVALUATION_LEDGER_WRAPPER_MISMATCH";
+  if (!hasExactKeys(event.observationIdentity, OBSERVATION_IDENTITY_KEYS)) {
+    return "EVALUATION_LEDGER_WRAPPER_MISMATCH";
+  }
   if (event.id !== expected.id) return "EVALUATION_LEDGER_IDENTITY_MISMATCH";
   if (event.timestamp !== expected.timestamp) return "EVALUATION_LEDGER_TIMESTAMP_MISMATCH";
   if (event.requestFingerprint !== expected.requestFingerprint) {
     return "EVALUATION_LEDGER_FINGERPRINT_MISMATCH";
   }
   if (
-    event.observationIdentity?.source !== expected.observationIdentity.source
-    || event.observationIdentity?.id !== expected.observationIdentity.id
+    event.observationIdentity.source !== expected.observationIdentity.source
+    || event.observationIdentity.id !== expected.observationIdentity.id
   ) {
     return "EVALUATION_LEDGER_OBSERVATION_IDENTITY_MISMATCH";
   }
@@ -205,6 +217,19 @@ function selectCandidate(event, selection) {
     return { state: "ignored" };
   }
   if (!subjectMatchesRepository(observation, selection.repository)) return { state: "ignored" };
+
+  const rawTaskClass = rawFactValue(observation, "proofwake.evaluation.task-class");
+  if (rawTaskClass.state === "available" && rawTaskClass.value !== selection.taskClass) {
+    return { state: "ignored" };
+  }
+  const rawTargetRun = rawFactValue(observation, "proofwake.evaluation.target-run");
+  if (
+    selection.targetRun
+    && rawTargetRun.state === "available"
+    && rawTargetRun.value !== selection.targetRun
+  ) {
+    return { state: "ignored" };
+  }
 
   let expected;
   try {
